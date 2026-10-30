@@ -1346,8 +1346,10 @@ function leafFx(dt){
 }
 
 /* Loop */
+let lastFrameT=0;   // limitador de fps (celular): no máximo 60
 function tick(now){
   requestAnimationFrame(tick);
+  if(IS_MOBILE){if(now-lastFrameT<15.2)return;lastFrameT=now;}   // telas de 90/120 Hz pulam quadros e ficam em ~60 fps; 60 Hz não perde nenhum
   if(IS_MOBILE)mobileFrame();
   const dt=Math.min(.05,(now-last)/1000);last=now;
   grassTime.value=now*.001;
