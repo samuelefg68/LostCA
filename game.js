@@ -13,13 +13,15 @@
     document.body.classList.toggle('mobile', IS_MOBILE);
     // ===== CONFIG: valores ajustáveis do jogo. Edite AQUI, não a lógica. =====
     const CONFIG = {
-        paths: { ground: 'assets/ground-texture.png', road: 'assets/road-texture.jpg', bgm: 'assets/music-theme.mp3', stepWalk: 'assets/footsteps-walk.mp3', stepRun: 'assets/footsteps-run.mp3', sword: ['assets/sword-1.mp3', 'assets/sword-2.mp3'], dash: 'assets/dash.mp3' },
+        paths: { ground: 'assets/ground-texture.png', road: 'assets/road-texture.jpg', bgm: 'assets/music-theme.mp3', stepWalk: 'assets/footsteps-walk.mp3', stepRun: 'assets/footsteps-run.mp3', sword: ['assets/sword-1.mp3', 'assets/sword-2.mp3'], dash: 'assets/dash.mp3', woosh: 'assets/sim.wav' },
         player: { walk: 6.5, run: 11, crouch: 2.8, jumpSpeed: 8.6, gravity: 22, jumpBuffer: .25, eyeStand: 2.6, eyeCrouch: 1.5, eyeLerp: 12, bobFactor: 1.6, flySpeed: 15, flyRunSpeed: 45 },
         combat: { attackCooldownMs: 120, attackBufferMs: 300, dashTime: .18, dashSpeed: 30, dashCooldownMs: 700 },
         camera: { fov: 72, near: .05, far: 600, fogColor: 0xe0855c, fogNear: 10, fogFar: 110 },
-        world: { size: 340, radius: 80, densityDesktop: 1, densityMobile: .6, flowerCount: 18000, grassCount: 18000, grassTallCount: 3000, reedCount: 4500, treeRing: 3600, treeRingMobileFactor: .65 },
+        world: { size: 340, radius: 80, densityDesktop: 1, densityMobile: .6, flowerCount: 18000, grassCount: 18000, grassTallCount: 3000, reedCount: 4500, treeRing: 3600, treeRingMobileFactor: .65, gateOpenTime: 2.2 },
+        corridor: { endMargin: 8, gap: 2.3, rows: 2, darkLen: 45, darkFogNear: 2, darkFogFar: 26, darkLight: .85, endRadius: 3 },
+        story: { gateDelay: .09, gateText: 'Você nota algo se movendo à sua direita.' },
         gfx: { pixelSize: 4, pixelSizeSmallScreen: 3, shadowMapDesktop: 2048, shadowMapMobile: 1024, shadowExtDesktop: 44, shadowExtMobile: 34 },
-        audio: { bgmSkipSec: 4, bgmGain: .5, bgmGainMuffled: .4, bgmMuffleHz: 380, stepWalkVol: .55, stepRunVol: .7, swordVol: .3, swordTiming: [{ off: .12, delay: 0 }, { off: 0, delay: .04 }], dashVol: .5, keyVol: .12, uiVol: .05 }
+        audio: { bgmSkipSec: 4, bgmGain: .5, stepWalkVol: .55, stepRunVol: .7, swordVol: .3, swordTiming: [{ off: .12, delay: 0 }, { off: 0, delay: .04 }], dashVol: .5, wooshVol: .7, keyVol: .12, uiVol: .05 }
     };
     const DENS = IS_MOBILE ? CONFIG.world.densityMobile : CONFIG.world.densityDesktop;
     const PIX_BASE = innerWidth < 700 ? CONFIG.gfx.pixelSizeSmallScreen : CONFIG.gfx.pixelSize;
@@ -48,6 +50,7 @@
     const scene = new THREE.Scene();
     scene.background = new THREE.Color(FOG);
     scene.fog = new THREE.Fog(FOG, CONFIG.camera.fogNear, CONFIG.camera.fogFar);
+    const FOG_OBJ = scene.fog;
     const cam = new THREE.PerspectiveCamera(CONFIG.camera.fov, 1, CONFIG.camera.near, CONFIG.camera.far);
     cam.rotation.order = 'YXZ';
     scene.add(cam);
@@ -62,9 +65,9 @@
     setTimeout(size, 1500);
     const sunDir = new THREE.Vector3(-.2, .34, -1).normalize();
     const sky = new THREE.Mesh(new THREE.SphereGeometry(300, 24, 16), new THREE.ShaderMaterial({ side: THREE.BackSide, depthWrite: false, fog: false,
-        uniforms: { sd: { value: sunDir.clone() }, t: { value: 0 }, uCl: { value: 1 } },
+        uniforms: { sd: { value: sunDir.clone() }, t: { value: 0 }, uCl: { value: 1 }, uDk: { value: 0 } },
         vertexShader: `varying vec3 v;void main(){v=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}`,
-        fragmentShader: `varying vec3 v;uniform vec3 sd;uniform float t;uniform float uCl;
+        fragmentShader: `varying vec3 v;uniform vec3 sd;uniform float t;uniform float uCl;uniform float uDk;
 float hs(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float nz(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(hs(i),hs(i+vec2(1,0)),f.x),mix(hs(i+vec2(0,1)),hs(i+vec2(1,1)),f.x),f.y);}
 float fbm(vec2 p){float a=.5,s=0.;for(int i=0;i<5;i++){s+=a*nz(p);p=p*2.03+vec2(1.7,9.2);a*=.5;}return s;}
@@ -83,7 +86,7 @@ void main(){
  vec3 cc=mix(vec3(.24,.11,.19),vec3(1.,.6,.4),lit);
  cc=mix(cc,vec3(1.,.82,.56),pow(sun,10.)*.8*(1.-n));
  c=mix(c,cc,cl*.93);}
- c=floor(c*7.+.5)/7.;
+ c*=1.-uDk;c=floor(c*7.+.5)/7.;
  gl_FragColor=vec4(c,1.);}` }));
     scene.add(sky);
     const hemi = new THREE.HemisphereLight(0xffc7a0, 0x4a2a30, .95);
@@ -128,6 +131,10 @@ void main(){
             TRAILS.push({ pts, end: e, dir: Math.atan2(dz, dx) });
         }
     }
+    const GATE_BEHIND = TRAILS[3], GATE_DOOR_COL = [], GATE_LEAVES = [], GATE_LEAF_COL = [];
+    let GATE_INFO = null, gateT = 0, gateOpening = false;
+    const CZ_END = -(WH - CONFIG.corridor.endMargin);
+    const inCorridor = (x, z, m) => z < GATE_BEHIND.end[1] + .5 + m && z > CZ_END - m && Math.abs(x - ROAD.x) < ROAD.hw + 6 + m;
     const nearEnd = (x, z, d) => TRAILS.some(T => Math.hypot(x - T.end[0], z - T.end[1]) < d);
     const RG_N = 1024, RG_S = WS, RG_K = RG_N / RG_S, RG = new Float32Array(RG_N * RG_N);
     {
@@ -780,7 +787,7 @@ void main(){
     for (const T of TRAILS)
         for (let q = 0; q < 6; q++) {
             const a = T.dir + (q - 2.5) * .7 + (Math.random() - .5) * .25, r = 8.5 + Math.random() * 3.5, x = T.end[0] + Math.cos(a) * r, z = T.end[1] + Math.sin(a) * r;
-            if (onRoad(x, z, 6))
+            if (onRoad(x, z, 6) || inCorridor(x, z, 2))
                 continue;
             mkPine(x, z, q);
         }
@@ -845,8 +852,9 @@ void main(){
         const hw = ROAD.hw, L = hw - .06, h0 = 4.2, h1 = 7.0, FL = 3.6, tr = (x) => new THREE.Matrix4().makeTranslation(x, 0, 0), ry = (a) => new THREE.Matrix4().makeRotationY(a);
         for (const T of TRAILS) {
             const dx = Math.cos(T.dir), dz = Math.sin(T.dir), gx = T.end[0] - dx * .5, gz = T.end[1] - dz * .5, a = Math.atan2(dx, dz), list = [];
-            leaf(list, tr(-hw), L, h0, h1);
-            leaf(list, tr(hw).multiply(ry(Math.PI)), L, h0, h1);
+            const swing = T === GATE_BEHIND, lA = [], lB = [];
+            leaf(swing ? lA : list, swing ? new THREE.Matrix4() : tr(-hw), L, h0, h1);
+            leaf(swing ? lB : list, swing ? ry(Math.PI) : tr(hw).multiply(ry(Math.PI)), L, h0, h1);
             leaf(list, tr(-hw).multiply(ry(Math.PI)), FL, h0, h0);
             leaf(list, tr(hw), FL, h0, h0);
             const m = new THREE.Mesh(mergeGeos(list), IRONM);
@@ -856,9 +864,30 @@ void main(){
             HQC.push(m);
             for (const g of list)
                 g.dispose();
-            const ca = Math.cos(a), sa = Math.sin(a), add = (lx, lz, r) => GATE_COL.push({ x: gx + lx * ca + lz * sa, z: gz - lx * sa + lz * ca, r });
-            for (let lx = -hw - FL; lx <= hw + FL + .01; lx += .7)
-                add(lx, 0, .25);
+            if (swing) {
+                const gg = new THREE.Group();
+                gg.position.set(gx, H(gx, gz) - .05, gz);
+                gg.rotation.y = a;
+                scene.add(gg);
+                HQC.push(gg);
+                [[lA, -hw, -1], [lB, hw, 1]].forEach(([lst, px, dir]) => {
+                    const pv = new THREE.Group();
+                    pv.position.x = px;
+                    pv.add(new THREE.Mesh(mergeGeos(lst), IRONM));
+                    gg.add(pv);
+                    GATE_LEAVES.push({ pv, dir });
+                    for (const g of lst)
+                        g.dispose();
+                });
+            }
+            const ca = Math.cos(a), sa = Math.sin(a), add = (lx, lz, r) => { const o = { x: gx + lx * ca + lz * sa, z: gz - lx * sa + lz * ca, r }; GATE_COL.push(o); return o; };
+            if (swing)
+                GATE_INFO = { gx, gz, ca, sa, hw, L };
+            for (let lx = -hw - FL; lx <= hw + FL + .01; lx += .7) {
+                const o = add(lx, 0, .25);
+                if (swing && Math.abs(lx) < hw)
+                    GATE_DOOR_COL.push(o);
+            }
             const SW = 2 * (hw + FL) + 1.6, SD = 6.5, sg = new THREE.PlaneGeometry(SW, SD, 24, 8);
             sg.rotateX(-Math.PI / 2);
             sg.translate(0, 0, -.5 + SD / 2);
@@ -915,6 +944,8 @@ void main(){
             const x = ROAD.x + Math.cos(a) * r, z = ROAD.z + Math.sin(a) * r;
             if (r < MAP_R + 10 && onRoad(x, z, 5))
                 continue;
+            if (inCorridor(x, z, 2))
+                continue;
             cand.push({ x, z, th: (16 + Math.random() * 14) * (1 + Math.max(0, r - MAP_R) / 65 * .35), col: r < MAP_R + 8 });
         }
         cand.sort((A, B) => (B.col ? 1 : 0) - (A.col ? 1 : 0));
@@ -967,6 +998,73 @@ void main(){
     const cy = (r1, r2, h, sg, m, x, y, z, rx, rz, p) => { const o = new THREE.Mesh(new THREE.CylinderGeometry(r1, r2, h, sg), m); o.position.set(x, y, z); if (rx)
         o.rotation.x = rx; if (rz)
         o.rotation.z = rz; (p || sword).add(o); return o; };
+    // ===== CORRIDOR: corredor escuro de árvores mortas atrás do portão =====
+    const CORR = CONFIG.corridor, CX = ROAD.x, CZ0 = GATE_BEHIND.end[1] + .5, CORR_END = { x: CX, z: CZ_END };
+    let corrDark = 0, corrDarkLast = 0, corrEndDone = false;
+    function onCorridorEnd() {
+        // PONTO MARCADO: o que acontece no fim do corredor ainda será definido. Dispara 1x quando o jogador chega em CORR_END.
+    }
+    {
+        const deadM = new THREE.MeshLambertMaterial({ color: 0x4a3d36, flatShading: true });
+        HQM.push(deadM);
+        const parts = [], o = new THREE.Object3D(), UP = new THREE.Vector3(0, 1, 0), dv = new THREE.Vector3();
+        const bpart = (x, y, z, sx, sy, sz, dir) => {
+            o.position.set(x, y, z);
+            if (dir)
+                o.quaternion.setFromUnitVectors(UP, dir);
+            else
+                o.quaternion.identity();
+            o.scale.set(sx, sy, sz);
+            o.updateMatrix();
+            parts.push(new THREE.BoxGeometry(1, 1, 1).applyMatrix4(o.matrix));
+        };
+        bpart(0, 4, 0, .55, 8, .55);
+        for (let i = 0; i < 6; i++) {
+            const ang = i * 2.4, h = 2.8 + i * .95, Lb = 2.6 - i * .22, tilt = .95;
+            dv.set(Math.cos(ang) * Math.sin(tilt), Math.cos(tilt), Math.sin(ang) * Math.sin(tilt)).normalize();
+            bpart(dv.x * Lb / 2, h + dv.y * Lb / 2, dv.z * Lb / 2, .16, Lb, .16, dv.clone());
+        }
+        const geo = mergeGeos(parts);
+        for (const g of parts)
+            g.dispose();
+        const spots = [], hw = ROAD.hw;
+        for (const side of [-1, 1])
+            for (let layer = 0; layer < CORR.rows; layer++)
+                for (let z = CZ0 - 1 - layer * 1.1; z > CZ_END; z -= CORR.gap * (.8 + Math.random() * .4))
+                    spots.push([CX + side * (hw + .9 + layer * 2.6 + Math.random() * .8), z]);
+        for (let layer = 0; layer < CORR.rows; layer++)
+            for (let x = CX - hw - 1; x <= CX + hw + 1; x += CORR.gap * (.8 + Math.random() * .4))
+                spots.push([x, CZ_END - .5 - layer * 1.2]);
+        const im = new THREE.InstancedMesh(geo, deadM, spots.length), m4 = new THREE.Object3D();
+        spots.forEach(([x, z], i) => {
+            const sc = .85 + Math.random() * .7;
+            m4.position.set(x, H(x, z) - .1, z);
+            m4.rotation.set((Math.random() - .5) * .16, Math.random() * 6.283, (Math.random() - .5) * .16);
+            m4.scale.set(sc, sc, sc);
+            m4.updateMatrix();
+            im.setMatrixAt(i, m4.matrix);
+        });
+        im.frustumCulled = false;
+        scene.add(im);
+        HQC.push(im);
+        for (const side of [-1, 1])
+            for (let z = CZ0 - .5; z > CZ_END; z -= .9)
+                GATE_COL.push({ x: CX + side * (hw + .9), z, r: .3 });
+        for (let x = CX - hw - .9; x <= CX + hw + .9; x += .9)
+            GATE_COL.push({ x, z: CZ_END - .2, r: .3 });
+    }
+    const CORR_FOG0 = new THREE.Color(FOG), CORR_BLACK = new THREE.Color(0x000000), corrTmp = new THREE.Color();
+    function applyCorrDark(k) {
+        corrTmp.copy(CORR_FOG0).lerp(CORR_BLACK, k);
+        scene.background.copy(corrTmp);
+        FOG_OBJ.color.copy(corrTmp);
+        FOG_OBJ.near = CONFIG.camera.fogNear + (CORR.darkFogNear - CONFIG.camera.fogNear) * k;
+        FOG_OBJ.far = CONFIG.camera.fogFar + (CORR.darkFogFar - CONFIG.camera.fogFar) * k;
+        sky.material.uniforms.uDk.value = k;
+        const lk = 1 - CORR.darkLight * k;
+        hemi.intensity = (hqOn ? .6 : .95) * lk;
+        dl.intensity = (hqOn ? 1.9 : 1.1) * lk;
+    }
     // ===== PLAYER MODEL: braços, espada, animação =====
     const BL = 1.5, NB = 12;
     for (let i = 0; i < NB; i++) {
@@ -1205,19 +1303,33 @@ void main(){
         dlgTx.innerHTML = h;
     }
     function closeDlg() { dlgOn = false; dlgEl.classList.remove('on', 'done'); }
+    function startDlg(lines) {
+        DLG_LINES = lines;
+        dlgI = 0;
+        DLG_TEXT = DLG_LINES[0];
+        dlgOn = true;
+        dlgN = 0;
+        dlgAcc = 0;
+        dlgSet('');
+        dlgEl.classList.remove('done');
+        dlgEl.classList.add('on');
+        hint.classList.remove('on');
+    }
+    let seenStat = false, seenDir = false, gateDone = false;
+    function openGate() { gateOpening = true; wooshPlay(); }
+    function onDlgEnd() {
+        if (DLG_LINES === STAT_LINES)
+            seenStat = true;
+        else if (DLG_LINES === DIR_LINES)
+            seenDir = true;
+        if (gateDone || !(seenStat && seenDir))
+            return;
+        gateDone = true;
+        setTimeout(() => { openGate(); startDlg([CONFIG.story.gateText]); }, CONFIG.story.gateDelay * 1000);
+    }
     function interact() {
-        if (!dlgOn) {
-            DLG_LINES = nearW === 2 ? DIR_LINES : STAT_LINES;
-            dlgI = 0;
-            DLG_TEXT = DLG_LINES[0];
-            dlgOn = true;
-            dlgN = 0;
-            dlgAcc = 0;
-            dlgSet('');
-            dlgEl.classList.remove('done');
-            dlgEl.classList.add('on');
-            hint.classList.remove('on');
-        }
+        if (!dlgOn)
+            startDlg(nearW === 2 ? DIR_LINES : STAT_LINES);
         else if (dlgN < DLG_TEXT.length) {
             dlgN = DLG_TEXT.length;
             dlgSet(DLG_TEXT);
@@ -1231,8 +1343,10 @@ void main(){
             dlgSet('');
             dlgEl.classList.remove('done');
         }
-        else
+        else {
             closeDlg();
+            onDlgEnd();
+        }
     }
     const fpsEl = document.getElementById('fps');
     let fly = false, fcx = 0, fcy = 0, fcz = 0;
@@ -1360,11 +1474,9 @@ void main(){
     catch (e) { }
     // ===== AUDIO: música, passos, espada, dash, sons de UI =====
     const BGM_SKIP = CONFIG.audio.bgmSkipSec;
-    let actx = null, bgmGain = null, bgmFlt = null, bgmBuf = null, bgmSrc = null, bgmWant = false, bgmMuf = true;
-    function bgmMuffle(m) { bgmMuf = m; if (!actx || !bgmFlt)
-        return; const t = actx.currentTime; bgmFlt.frequency.setTargetAtTime(m ? CONFIG.audio.bgmMuffleHz : 20000, t, .04); bgmGain.gain.setTargetAtTime(m ? CONFIG.audio.bgmGainMuffled : CONFIG.audio.bgmGain, t, .04); }
+    let actx = null, bgmGain = null, bgmBuf = null, bgmSrc = null, bgmWant = false;
     function bgmStart() { if (!bgmWant || !bgmBuf || bgmSrc || !actx)
-        return; bgmSrc = actx.createBufferSource(); bgmSrc.buffer = bgmBuf; bgmSrc.loop = true; bgmSrc.loopStart = BGM_SKIP; bgmSrc.loopEnd = bgmBuf.duration; bgmSrc.connect(bgmFlt); bgmSrc.start(0, BGM_SKIP); }
+        return; bgmSrc = actx.createBufferSource(); bgmSrc.buffer = bgmBuf; bgmSrc.loop = true; bgmSrc.loopStart = BGM_SKIP; bgmSrc.loopEnd = bgmBuf.duration; bgmSrc.connect(bgmGain); bgmSrc.start(0, BGM_SKIP); }
     function bgmInit() {
         if (actx)
             return;
@@ -1385,12 +1497,7 @@ void main(){
             uiBus.connect(master);
             bgmGain = actx.createGain();
             bgmGain.connect(musBus);
-            bgmFlt = actx.createBiquadFilter();
-            bgmFlt.type = 'lowpass';
-            bgmFlt.Q.value = .6;
-            bgmFlt.connect(bgmGain);
-            bgmFlt.frequency.value = bgmMuf ? CONFIG.audio.bgmMuffleHz : 20000;
-            bgmGain.gain.value = bgmMuf ? CONFIG.audio.bgmGainMuffled : CONFIG.audio.bgmGain;
+            bgmGain.gain.value = CONFIG.audio.bgmGain;
             stepLoad();
             swordLoad();
             loadAudio(BGM_URL, b => { bgmBuf = b; bgmStart(); }, 'música');
@@ -1402,7 +1509,6 @@ void main(){
     function bgmPlay() { bgmWant = true; bgmInit(); if (!actx)
         return; const r = actx.resume(); if (r && r.catch)
         r.catch(() => { }); bgmStart(); }
-    function bgmDuck() { bgmMuffle(true); }
     const STEP_URL = { walk: CONFIG.paths.stepWalk, run: CONFIG.paths.stepRun };
     const STEP_VOL = { walk: CONFIG.audio.stepWalkVol, run: CONFIG.audio.stepRunVol };
     let stepG = {}, stepCur = null;
@@ -1451,6 +1557,18 @@ function dashPlay() {
         if (playback && playback.catch) {
             playback.catch(() => {});
         }
+    } catch (e) {}
+}
+const wooshAudio = new Audio(CONFIG.paths.woosh);
+wooshAudio.preload = 'auto';
+function wooshPlay() {
+    try {
+        wooshAudio.pause();
+        wooshAudio.currentTime = 0;
+        wooshAudio.volume = Math.max(0, Math.min(1, volMaster * volSfx * CONFIG.audio.wooshVol));
+        const playback = wooshAudio.play();
+        if (playback && playback.catch)
+            playback.catch(() => {});
     } catch (e) {}
 }
     const KEY_VOL = CONFIG.audio.keyVol;
@@ -1581,7 +1699,6 @@ function dashPlay() {
     function start() {
         paused = false;
         bgmPlay();
-        bgmMuffle(false);
         active = true;
         if (dlgOn)
             dlgEl.classList.add('on');
@@ -1616,7 +1733,6 @@ function dashPlay() {
     function pause() {
         paused = true;
         pausedAt = performance.now();
-        bgmDuck();
         dlgEl.classList.remove('on');
         active = false;
         hint.classList.remove('on');
@@ -2226,6 +2342,47 @@ function dashPlay() {
         if (!active)
             stepSet(null);
         leafFx(dt);
+        if (gateOpening && gateT < 1) {
+            gateT = Math.min(1, gateT + dt / CONFIG.world.gateOpenTime);
+            const e = gateT * gateT * (3 - 2 * gateT);
+            const ang = 1.45 * e;
+            for (const L of GATE_LEAVES)
+                L.pv.rotation.y = L.dir * ang;
+            if (GATE_INFO) {
+                if (GATE_DOOR_COL.length) {
+                    for (const o of GATE_DOOR_COL) {
+                        const i = GATE_COL.indexOf(o);
+                        if (i >= 0)
+                            GATE_COL.splice(i, 1);
+                    }
+                    GATE_DOOR_COL.length = 0;
+                    for (const lf of GATE_LEAVES)
+                        for (let d = .3; d <= GATE_INFO.L; d += .7) {
+                            const o = { x: 0, z: 0, r: .25, d, dir: lf.dir, px: lf.pv.position.x };
+                            GATE_LEAF_COL.push(o);
+                            GATE_COL.push(o);
+                        }
+                }
+                for (const o of GATE_LEAF_COL) {
+                    const lx = o.px - o.dir * o.d * Math.cos(ang), lz = o.d * Math.sin(ang);
+                    o.x = GATE_INFO.gx + lx * GATE_INFO.ca + lz * GATE_INFO.sa;
+                    o.z = GATE_INFO.gz - lx * GATE_INFO.sa + lz * GATE_INFO.ca;
+                }
+            }
+        }
+        {
+            const inC = pz < CZ0 && Math.abs(px - CX) < ROAD.hw + 6, tgt = inC ? Math.min(1, (CZ0 - pz) / CORR.darkLen) : 0;
+            corrDark += (tgt - corrDark) * Math.min(1, dt * 2.5);
+            if (tgt === 0 && corrDark < .003)
+                corrDark = 0;
+            if (corrDark > 0 || corrDarkLast > 0)
+                applyCorrDark(corrDark);
+            corrDarkLast = corrDark;
+            if (!corrEndDone && Math.hypot(px - CORR_END.x, pz - CORR_END.z) < CORR.endRadius) {
+                corrEndDone = true;
+                onCorridorEnd();
+            }
+        }
         tip.classList.toggle('on', active && nearK && !dlgOn && !fly);
         if (dlgOn && dlgN < DLG_TEXT.length) {
             dlgAcc += dt * 1000;
