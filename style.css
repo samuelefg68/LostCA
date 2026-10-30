@@ -41,7 +41,7 @@ button.alt:hover{box-shadow:2px 2px 0 #2c5a3a}
 .cfgbox .seg button:not(.on):hover{box-shadow:2px 2px 0 #2c5a3a}
 .cfgbox .gdesc{margin:0 0 22px;font-size:12px;line-height:1.7;color:var(--dim)}
 .cfgbox .tgl small{display:block;margin-top:5px;font-size:10px;line-height:1.5;color:var(--dim);opacity:.75}
-#ov.first{background:linear-gradient(to top,rgba(8,20,13,.88),rgba(8,20,13,0) 65%),url(assets/menu-background.jpg) center/cover no-repeat}
+#ov.first{background:linear-gradient(to top,rgba(8,20,13,.88),rgba(8,20,13,0) 65%),url(assets/meu-background.png) center/cover no-repeat}
 h1{font-size:clamp(34px,7vw,56px);line-height:1;margin:0 0 12px;font-weight:700;color:var(--ink);text-shadow:3px 3px 0 #2f7a45}
 p{margin:0 0 18px;font-size:14px;line-height:1.6;color:var(--dim);max-width:40ch}
 dl{display:grid;grid-template-columns:auto 1fr;gap:6px 16px;margin:0 0 22px;font-size:13px}
