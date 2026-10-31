@@ -24,6 +24,7 @@
   <div class="tabs" role="tablist"><button type="button" class="tab on" data-tab="paneGeral" role="tab" aria-selected="true">Geral</button><button type="button" class="tab" data-tab="paneGfx" role="tab" aria-selected="false">Gráficos</button><button type="button" class="tab" data-tab="paneSom" role="tab" aria-selected="false">Som</button></div>
   <div class="pane on" id="paneGeral">
     <label><span id="sensL">Sensibilidade do mouse</span><b id="sensV">1.0x</b><input type="range" id="sens" min="0.2" max="3" step="0.1" value="1"></label>
+    <label><span>Campo de visão</span><b id="fovV">72°</b><input type="range" id="fov" min="60" max="110" step="1" value="72"></label>
     <div class="tgl"><span>Visual pixelado</span><button type="button" id="pixBtn" aria-pressed="true">Ligado</button></div>
   </div>
   <div class="pane" id="paneGfx">
@@ -72,6 +73,7 @@
 </div>
 
 <canvas id="leaf"></canvas>
+<div id="fade"></div>
 <div id="mlook"></div>
 <div id="mui">
   <div id="mjz"><div id="mjb"><div id="mjt"></div></div></div>
