@@ -1,5 +1,6 @@
 // ARQUIVO: MAIN LOOP (tick: física, câmera, render).
     // ===== MAIN LOOP: tick (física, câmera, render) =====
+    let petAcc = 0, petFr = 0;
     function tick(now) {
         requestAnimationFrame(tick);
         if (IS_MOBILE) {
@@ -116,7 +117,7 @@
                 fcy += (sp2 * ff + uu) * fs * dt;
                 fcz += (-cy * cp * ff - sy * ss) * fs * dt;
             }
-            const gh = inCube ? CUBE_Y : inBridge ? BR_DECK_Y : H(px, pz);
+            const gh = inCube ? cubeGround(px, pz) : inBridge ? BR_DECK_Y : H(px, pz); // cubo: corredor, piso da sala e escada (cube.js)
             if ((keys.Space || jumpQ > 0) && grounded && !crouch && !dlgOn && !fly && !walkBusy) {
                 vy = CONFIG.player.jumpSpeed;
                 grounded = false;
@@ -131,6 +132,8 @@
                     grounded = true;
                 }
             }
+            else if (inCube && Math.abs(gh - py) > .005) // cubo: sobe/desce os degraus com suavização (inner.stairs.smooth), sem solavanco a cada degrau
+                py += (gh - py) * Math.min(1, dt * CONFIG.cube.inner.stairs.smooth);
             else
                 py = gh;
             if (moving && grounded)
@@ -265,9 +268,15 @@
         sky.position.copy(cam.position);
         sky.material.uniforms.t.value = t;
         const pa = pg.attributes.position;
-        if (!perfOn && !inCube) // no cubo as pétalas (do mapa antigo, já descartado) não são mais atualizadas
+        petAcc += dt;
+        petFr ^= 1;
+        const petRun = petFr === 0 && !perfOn && !inCube; // pétalas atualizadas a cada 2 frames (com o dt acumulado)
+        const pdt = Math.min(petAcc, .1);
+        if (petRun)
+            petAcc = 0;
+        if (petRun) // no cubo as pétalas (do mapa antigo, já descartado) não são mais atualizadas
             for (let i = 0; i < PN; i++) {
-                let x = pa.getX(i) + dt * 1.4, y = pa.getY(i) - dt * .35, z = pa.getZ(i) + Math.sin(t + i) * dt * .4;
+                let x = pa.getX(i) + pdt * 1.4, y = pa.getY(i) - pdt * .35, z = pa.getZ(i) + Math.sin(t + i) * pdt * .4;
                 const cx = cam.position.x, cz = cam.position.z;
                 if (x - cx > 20)
                     x -= 40;
@@ -281,11 +290,13 @@
                     y += 14;
                 pa.setXYZ(i, x, y, z);
             }
-        if (!perfOn && !inCube)
+        if (petRun)
             pa.needsUpdate = true;
+        let rAlive = false;
         for (let i = 0; i < RN; i++) {
             if (rl[i] <= 0)
                 continue;
+            rAlive = true;
             rl[i] -= dt;
             rv[i * 3 + 1] -= 6 * dt;
             rp[i * 3] += rv[i * 3] * dt;
@@ -301,7 +312,8 @@
             if (rl[i] <= 0)
                 rp[i * 3 + 1] = -100;
         }
-        rg.attributes.position.needsUpdate = true;
+        if (rAlive)
+            rg.attributes.position.needsUpdate = true; // só envia à GPU quando há partícula viva (inclui o frame em que a última some)
         impactUpdate(dt);
         if (hqOn)
             sunFollow();

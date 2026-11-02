@@ -1,11 +1,11 @@
-// ARQUIVO: DIALOGUE (diálogo, interação, evento do portão).
-    // ===== DIALOGUE: diálogo e interação (E) =====
+// ARQUIVO: DIALOGUE (dialogo, interacao E, evento do portao) + FREECAM e debug.
+// ===== DIALOGUE: dialogo, interacao (E) e evento do portao =====
     const STAT_LINES = ['A estátua do cavaleiro centenário.', 'Você não quer causar nenhum dano.'];
     const DIR_LINES = ['↓ Floresta Vasta.', '↑ Cemitério.', '← A Vila Abandonada.', '→ Ruínas do Reino.'];
     const WALK_LINES = [CONFIG.story.walkText];
     const FRAME_LINES = [(CONFIG.cube && CONFIG.cube.corridor && CONFIG.cube.corridor.frame && CONFIG.cube.corridor.frame.text) || 'Retrato de uma moça sorrindo.']; // E num quadro do corredor do castelo
-let walkBusy = false; // true do fim do diálogo do corredor até o fim da espera no preto (tick bloqueia movimento/pulo/dash/ataque)
-let DLG_LINES = STAT_LINES, DLG_TEXT = STAT_LINES[0], dlgI = 0;
+    let walkBusy = false; // true do fim do diálogo do corredor até o fim da espera no preto (tick bloqueia movimento/pulo/dash/ataque)
+    let DLG_LINES = STAT_LINES, DLG_TEXT = STAT_LINES[0], dlgI = 0;
     let dlgOn = false, dlgN = 0, dlgAcc = 0;
     const ARW = { '↑': '', '→': ' r', '↓': ' d', '←': ' l' };
     function dlgSet(t) {
@@ -61,7 +61,11 @@ let DLG_LINES = STAT_LINES, DLG_TEXT = STAT_LINES[0], dlgI = 0;
     }
     function interact() {
         if (!dlgOn) {
-            if (nearD)
+            if (nearKey)
+                cubeKeyUse(); // cube.js: pega a chave da sala (sem diálogo)
+            else if (nearD3)
+                cubeDoor3Use(); // cube.js: porta trancada do fim da escada (mesmo diálogo da porta do fim do corredor)
+            else if (nearD)
                 coliseumDoorUse(); // coliseum.js: porta do fim do corredor do castelo
             else
                 startDlg(nearF ? FRAME_LINES : nearW === 2 ? DIR_LINES : STAT_LINES);
@@ -84,6 +88,8 @@ let DLG_LINES = STAT_LINES, DLG_TEXT = STAT_LINES[0], dlgI = 0;
             onDlgEnd();
         }
     }
+
+// ===== FREECAM: camera livre e debug =====
     const fpsEl = document.getElementById('fps');
     let fly = false, fcx = 0, fcy = 0, fcz = 0;
     const fcEl = document.createElement('div');
@@ -91,7 +97,22 @@ let DLG_LINES = STAT_LINES, DLG_TEXT = STAT_LINES[0], dlgI = 0;
     fcEl.textContent = 'FREECAM (Del para sair)';
     fcEl.style.cssText = 'position:fixed;left:50%;top:8px;transform:translateX(-50%);font:12px monospace;color:#9cf0ff;text-shadow:1px 1px 0 #000;pointer-events:none;display:none';
     document.body.appendChild(fcEl);
-    function setFly(v) { fly = v; if (!v)
+    // ao SAIR da câmera livre o jogador fica onde a câmera parou (mesmo yaw/pitch, vy = 0): aplica os limites da área atual e assenta no chão dela. Não troca de área (para isso, painel T em teleport.js)
+    function flyLand() {
+        px = fcx;
+        pz = fcz;
+        vy = 0;
+        dashT = 0;
+        if (inBridge)
+            bridgeClamp();
+        if (inCube) {
+            cubeLX = cubeLZ = NaN; // sem histórico: senão a varredura de cubeClamp() arrastaria o jogador do último ponto válido até a câmera e o barraria numa parede
+            cubeClamp();
+        }
+        py = inCube ? cubeGround(px, pz) : inBridge ? BR_DECK_Y : H(px, pz);
+        grounded = true;
+    }
+    function setFly(v) { const was = fly; fly = v; if (was && !v) flyLand(); if (!v)
         document.body.classList.remove('noui'); fcEl.style.display = v ? 'block' : 'none'; cam.children.forEach(o => { o.visible = !v; }); if (v) {
         fcx = cam.position.x;
         fcy = cam.position.y;

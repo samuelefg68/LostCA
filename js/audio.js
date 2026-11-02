@@ -29,6 +29,9 @@
             brBgmGain = actx.createGain();
             brBgmGain.connect(musBus);
             brBgmGain.gain.value = CONFIG.audio.bridgeBgmGain;
+            cubBgmGain = actx.createGain();
+            cubBgmGain.connect(musBus);
+            cubBgmGain.gain.value = CONFIG.audio.cubeBgmGain;
             stepLoad();
             swordLoad();
             impactLoad();
@@ -36,6 +39,7 @@
             loadAudio(CONFIG.paths.knockdown, b => { knockdownBuf = b; }, 'som da derrubada');
             loadAudio(BGM_URL, b => { bgmBuf = b; bgmStart(); }, 'música');
             loadAudio(CONFIG.paths.bridgeBgm, b => { brBgmBuf = b; if (brBgmWant) bridgeBgmStart(); }, 'música da ponte');
+            loadAudio(CONFIG.paths.cubeBgm, b => { cubBgmBuf = b; if (cubBgmWant) cubeBgmStart(); }, 'música do cubo');
         }
         catch (e) {
             console.warn('música indisponível', e);
@@ -86,6 +90,45 @@
                 bgmSrc = null;
             }
             bridgeBgmStart();
+        }
+    }
+    // cubo (chamada por enterCube, cube.js): a música da ponte (ou a do jogo, se vier direto, p.ex. pelo teleporte) some com fade de audio.cubeFadeOut s e DEPOIS começa castelo.mp3 em loop (volume audio.cubeBgmGain, pelo musBus)
+    let cubBgmGain = null, cubBgmBuf = null, cubBgmSrc = null, cubBgmWant = false, cubBgmAt = 0;
+    function cubeBgmStart() {
+        if (!actx || !cubBgmBuf || !cubBgmGain || cubBgmSrc)
+            return;
+        try {
+            cubBgmSrc = actx.createBufferSource();
+            cubBgmSrc.buffer = cubBgmBuf;
+            cubBgmSrc.loop = true;
+            cubBgmSrc.connect(cubBgmGain);
+            cubBgmSrc.start(Math.max(actx.currentTime, cubBgmAt));
+        }
+        catch (e) { cubBgmSrc = null; }
+    }
+    function cubeBgmPlay() {
+        if (cubBgmWant)
+            return;
+        cubBgmWant = true;
+        bgmOff = true;
+        brBgmWant = false; // a música da ponte não pode mais (re)começar
+        const fd = CONFIG.audio.cubeFadeOut;
+        if (actx) {
+            const t = actx.currentTime;
+            cubBgmAt = t + fd;
+            for (const [g, src] of [[bgmGain, bgmSrc], [brBgmGain, brBgmSrc]])
+                if (g && src) {
+                    try {
+                        g.gain.cancelScheduledValues(t);
+                        g.gain.setValueAtTime(g.gain.value, t);
+                        g.gain.linearRampToValueAtTime(0, t + fd);
+                        src.stop(t + fd + .05);
+                    }
+                    catch (e) { }
+                }
+            bgmSrc = null;
+            brBgmSrc = null;
+            cubeBgmStart();
         }
     }
     const STEP_URL = { walk: CONFIG.paths.stepWalk, run: CONFIG.paths.stepRun };

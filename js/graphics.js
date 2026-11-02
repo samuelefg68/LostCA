@@ -141,7 +141,7 @@
             dl.shadow.bias = -.0004;
             dl.shadow.normalBias = .06;
         }
-        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.shadowMap.type = THREE.PCFShadowMap;
         let envRT = null;
         const ENVM = [[aL, .3], [aM, .28], [aD, .18], [goldK, .55], [bladeK, .65], [bladeM, .5], [hamonM, .6], [goldM, .55], [goldD, .4], [silverM, .5], [plate, .3], [plateD, .25], [gold, .45]];
         const envCapture = () => {
@@ -290,7 +290,7 @@
         cfg.addEventListener('mousedown', e => { if (e.target === cfg)
             window.__closeCfg(); });
     }
-    document.addEventListener('pointerlockchange', () => { if (active && document.pointerLockElement !== cv)
+    document.addEventListener('pointerlockchange', () => { if (active && document.pointerLockElement !== cv && !tpEsc()) // tpEsc (teleport.js): o Esc que solta o mouse com o painel T aberto só fecha o painel, sem pausar
         pause(); });
     const mlook = document.getElementById('mlook'), mjz = document.getElementById('mjz'), mjb = document.getElementById('mjb'), mjt = document.getElementById('mjt');
     // ===== MOBILE UI: joystick e botões de toque =====
@@ -428,20 +428,42 @@
     const leaf = document.getElementById('leaf'), leafG = leaf.getContext('2d');
     // ===== LEAF FX: folhas na tela =====
     let leafD = 0, leafLv = -1, leafCell = 0, leafW = 0, leafH = 0;
+    const leafCache = new Map();
+    let leafKey = '', leafTick = 0, leafTgt = 0;
     function leafDraw(lv) {
-        const cell = leafCell, W = leaf.width = leafW, H = leaf.height = leafH, k = Math.min(1, .4 + .6 * lv / 6), g = leafG;
-        g.fillStyle = 'rgba(4,14,8,.97)';
-        g.beginPath();
-        for (let y = cell / 2; y < H + cell; y += cell)
-            for (let x = cell / 2; x < W + cell; x += cell) {
-                const e = Math.min(1, Math.hypot((x - W / 2) / (W / 2), (y - H / 2) / (H / 2)) / 1.414);
-                const r = cell * .74 * k * (.42 + .58 * Math.pow(e, 1.1));
-                if (r < .6)
-                    continue;
-                g.moveTo(x + r, y);
-                g.arc(x, y, r, 0, 6.2832);
-            }
-        g.fill();
+        // canvas em 1/LS da tela (LS = 3), ampliado por CSS; cada nível (lv) é desenhado UMA vez num canvas fora da tela e depois só copiado (drawImage). O canvas visível só é redimensionado quando tela/célula mudam.
+        const LS = 3, W = Math.ceil(leafW / LS), Hh = Math.ceil(leafH / LS), key = W + 'x' + Hh + ':' + leafCell;
+        if (key !== leafKey) {
+            leafKey = key;
+            leafCache.clear();
+            leaf.width = W;
+            leaf.height = Hh;
+            leaf.style.width = leafW + 'px';
+            leaf.style.height = leafH + 'px';
+            leaf.style.imageRendering = 'pixelated';
+        }
+        let c = leafCache.get(lv);
+        if (!c) {
+            c = document.createElement('canvas');
+            c.width = W;
+            c.height = Hh;
+            const cell = leafCell / LS, k = Math.min(1, .4 + .6 * lv / 6), g = c.getContext('2d');
+            g.fillStyle = 'rgba(4,14,8,.97)';
+            g.beginPath();
+            for (let y = cell / 2; y < Hh + cell; y += cell)
+                for (let x = cell / 2; x < W + cell; x += cell) {
+                    const e = Math.min(1, Math.hypot((x - W / 2) / (W / 2), (y - Hh / 2) / (Hh / 2)) / 1.414);
+                    const r = cell * .74 * k * (.42 + .58 * Math.pow(e, 1.1));
+                    if (r < .6)
+                        continue;
+                    g.moveTo(x + r, y);
+                    g.arc(x, y, r, 0, 6.2832);
+                }
+            g.fill();
+            leafCache.set(lv, c);
+        }
+        leafG.clearRect(0, 0, W, Hh);
+        leafG.drawImage(c, 0, 0);
     }
     function canopyDepth(cx, cy, cz) {
         let best = 0;
@@ -462,7 +484,11 @@
         return best;
     }
     function leafFx(dt) {
-        const target = active && !fly ? canopyDepth(px, py + eye, pz) : 0;
+        if (++leafTick >= 3) { // canopyDepth varre TREE_COL: roda a cada 3 frames (leafD já suaviza)
+            leafTick = 0;
+            leafTgt = active && !fly ? canopyDepth(px, py + eye, pz) : 0;
+        }
+        const target = leafTgt;
         leafD += (target - leafD) * Math.min(1, dt * 9);
         if (leafD < .05) {
             if (leaf.style.display !== 'none') {

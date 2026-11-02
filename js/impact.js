@@ -67,8 +67,8 @@
                 s.t = 0;
                 return;
             }
-        if (T.g === undefined && T.i !== undefined)
-            T.o = TREE_INST.map(m => { const mt = new THREE.Matrix4(); m.getMatrixAt(T.i, mt); return mt; });
+        if (T.g === undefined && T.i !== undefined && !T.o) // matrizes originais guardadas uma única vez por árvore (sem realocar a cada golpe)
+            T.o =TREE_INST.map(m => { const mt = new THREE.Matrix4(); m.getMatrixAt(T.i, mt); return mt; });
         IMP_SHAKES.push({ T, t: 0, ax: fz, az: -fx, amp: IMP.shakeAmp });
     }
     function gateShake(G, fx, fz) {

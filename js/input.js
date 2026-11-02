@@ -53,6 +53,8 @@
             }
             return;
         }
+        if (tpKey(e)) // teleport.js: painel de teleporte (T); consome todas as teclas enquanto aberto
+            return;
         if (!active && !ov.classList.contains('off') && (e.code === 'Space' || e.key === ' ')) {
             e.preventDefault();
             if (!e.repeat)
