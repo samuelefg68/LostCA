@@ -27,6 +27,23 @@
     const rpos = () => { const a = Math.random() * 6.283, r = Math.sqrt(Math.random()) * (MAP_R - 1); return [ROAD.x + Math.cos(a) * r, ROAD.z + Math.sin(a) * r]; };
     const TRAILS = [], END_TREES = [], TREE_COL = [], GATE_COL = [], GATE_SH = [], PERF = [], HQC = [], HQR = [], HQM = [];
     const perfReg = (m, f, keep) => { PERF.push({ m, full: m.count, f, keep: keep || 0 }); };
+    // ===== VEG CHUNKS (estado global): grama/flores/juncos são divididos em chunks (células de world.veg.chunk m) com esfera de culling própria; vegCull() (chamada todo frame no tick) esconde os chunks além de world.veg.dist m (só no mobile por padrão; 0 = sem corte por distância). VEG_ON = false esconde toda a vegetação (usado pelo modo ?debug=1) =====
+    let VEG_ON = true;
+    const VEG_CH = [];
+    function vegCull() {
+        if (!VEG_CH.length || inBridge || inCube)
+            return;
+        const cx = cam.position.x, cz = cam.position.z, V = CONFIG.world.veg, D = IS_MOBILE ? V.distMobile : V.distDesktop, D2 = D * D;
+        for (const c of VEG_CH) {
+            let v = VEG_ON;
+            if (v && D > 0) {
+                const dx = Math.max(c.x0 - cx, 0, cx - c.x1), dz = Math.max(c.z0 - cz, 0, cz - c.z1);
+                v = dx * dx + dz * dz < D2;
+            }
+            for (const m of c.ms)
+                m.visible = v;
+        }
+    }
     {
         for (let k = 0; k < 4; k++) {
             const dx = Math.round(Math.cos(k * Math.PI / 2)), dz = Math.round(Math.sin(k * Math.PI / 2)), pts = [];
@@ -284,6 +301,75 @@
     for (let v = 0; v < 3; v++)
         scatter(grassGeo(6 + v, .14, .08, .6), Math.round(CONFIG.world.grassTallCount * DENS * AK), [0x3f7a2c, 0x54902f, 0x2e6a28, 0x7aa83a], o => { const w = .8 + Math.random() * .7; o.scale.set(w, .6 + Math.random() * .7, w); }, GM);
     scatter(new THREE.CylinderGeometry(.05, .02, 1, 4).translate(0, .5, 0), Math.round(CONFIG.world.reedCount * DENS * AK), [0xb8a35a, 0x9c8a4a, 0xc9a85c, 0x8a6a3a], o => { o.scale.y = 1.3 + Math.random() * .9; o.rotation.x = (Math.random() - .5) * .35; o.rotation.z = (Math.random() - .5) * .35; }, grassMat(false));
+    // ===== VEG CHUNKS (construção): reagrupa as InstancedMesh de flores/grama/juncos já preenchidas em chunks. Meshes com a MESMA geometria e material (flores do campo + flores dos caminhos) viram um só grupo. Cada chunk = geometria própria (clone) com boundingSphere calculada, frustumCulled ligado e instâncias embaralhadas (o perfReg corta por prefixo). Desligue com world.veg.enabled = false ou ?vegcull=0 =====
+    if (CONFIG.world.veg.enabled && !/[?&]vegcull=0/.test(location.search)) {
+        const V = CONFIG.world.veg, C = V.chunk, X0 = ROAD.x - MAP_R - 2, Z0 = ROAD.z - MAP_R - 2, srcs = PERF.slice(), groups = new Map(), VC = new Map(), vv = new THREE.Vector3(), bb = new THREE.Box3();
+        PERF.length = 0;
+        for (const e of srcs) {
+            const k = e.m.geometry.uuid + '|' + e.m.material.uuid;
+            if (!groups.has(k))
+                groups.set(k, []);
+            groups.get(k).push(e);
+            const h = HQR.indexOf(e.m);
+            if (h >= 0)
+                HQR.splice(h, 1);
+        }
+        for (const list of groups.values()) {
+            const geo0 = list[0].m.geometry, mat = list[0].m.material;
+            geo0.computeBoundingSphere();
+            const pad = geo0.boundingSphere.radius * 1.7 + .6, cells = new Map();
+            let ft = 0, nt = 0;
+            list.forEach((e, si) => {
+                const n = e.m.count, ma = e.m.instanceMatrix.array;
+                ft += e.f * n;
+                nt += n;
+                for (let i = 0; i < n; i++) {
+                    const kx = Math.floor((ma[i * 16 + 12] - X0) / C), kz = Math.floor((ma[i * 16 + 14] - Z0) / C), key = kx + ',' + kz;
+                    let c = cells.get(key);
+                    if (!c)
+                        cells.set(key, c = { kx, kz, ids: [] });
+                    c.ids.push(si * 1048576 + i);
+                }
+            });
+            const f = nt ? ft / nt : .45;
+            for (const [key, c] of cells) {
+                const ids = c.ids;
+                for (let a = ids.length - 1; a > 0; a--) {
+                    const b = Math.floor(Math.random() * (a + 1)), t = ids[a];
+                    ids[a] = ids[b];
+                    ids[b] = t;
+                }
+                const g = geo0.clone(), im = new THREE.InstancedMesh(g, mat, ids.length), arr = im.instanceMatrix.array;
+                bb.makeEmpty();
+                ids.forEach((code, k) => {
+                    const s0 = list[Math.floor(code / 1048576)].m, i = code % 1048576, ma = s0.instanceMatrix.array;
+                    arr.set(ma.subarray(i * 16, i * 16 + 16), k * 16);
+                    if (s0.instanceColor) {
+                        tc.fromArray(s0.instanceColor.array, i * 3);
+                        im.setColorAt(k, tc);
+                    }
+                    const x = ma[i * 16 + 12], y = ma[i * 16 + 13], z = ma[i * 16 + 14];
+                    bb.expandByPoint(vv.set(x - pad, y - pad, z - pad));
+                    bb.expandByPoint(vv.set(x + pad, y + pad, z + pad));
+                });
+                const sph = new THREE.Sphere();
+                bb.getBoundingSphere(sph);
+                g.boundingSphere = sph;
+                scene.add(im);
+                HQR.push(im);
+                perfReg(im, f, 0);
+                let cell = VC.get(key);
+                if (!cell) {
+                    cell = { ms: [], x0: X0 + c.kx * C, x1: X0 + (c.kx + 1) * C, z0: Z0 + c.kz * C, z1: Z0 + (c.kz + 1) * C };
+                    VC.set(key, cell);
+                    VEG_CH.push(cell);
+                }
+                cell.ms.push(im);
+            }
+        }
+        for (const e of srcs)
+            scene.remove(e.m);
+    }
     const bx = (w, h, d, m, x, y, z, p, rx, rz) => { const o = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), m); o.position.set(x, y, z); if (rx)
         o.rotation.x = rx; if (rz)
         o.rotation.z = rz; p.add(o); return o; };

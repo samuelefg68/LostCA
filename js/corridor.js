@@ -92,10 +92,14 @@
         catch (e) { }
         return -1;
     }
+    let corrBoxLast = -1;
     function corrBoxUpdate() {
         const t = corrBoxT();
         const a = t >= 0 ? CORR.boxAlpha + (1 - CORR.boxAlpha) * t : 0;
-        CORR_BOX_EL.style.opacity = a;
+        if (a !== corrBoxLast) { // só escreve no DOM quando o valor muda (antes escrevia todo frame)
+            corrBoxLast = a;
+            CORR_BOX_EL.style.opacity = a;
+        }
         requestAnimationFrame(corrBoxUpdate);
     }
     requestAnimationFrame(corrBoxUpdate);

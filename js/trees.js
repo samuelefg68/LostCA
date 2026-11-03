@@ -218,40 +218,28 @@
             HQC.push(mm);
         }
     }
-    // ===== EDGE PINES: fileira contínua (1 pinheiro a cada edgePines.rowGap m) na beira das 4 bordas do terreno (±WH) + faixa aleatória atrás dela, para esconder o vazio; sem colisão, fora de TREE_COL =====
+    // ===== EDGE PINES: fileira contínua (1 pinheiro a cada edgePines.rowGap m) na beira das 4 bordas do terreno (±WH) + faixa aleatória atrás dela, para esconder o vazio; sem colisão, fora de TREE_COL. Dividido em CHUNKS (células de edgePines.chunk m) com esfera de culling própria: a câmera só desenha os chunks à vista. Cada chunk = 2 InstancedMesh (tronco + 6 cones fundidos numa geometria só) =====
+    const EDGE_MESHES = [];
     {
-        const EP = CONFIG.world.edgePines, NE = Math.round(EP.count * (IS_MOBILE ? EP.mobileFactor : 1)), NS = Math.floor(WS / EP.rowGap) + 1, NT = NE + 4 * NS, o = new THREE.Object3D(), pc = PINE_COLS.map(c => new THREE.Color(c));
-        const trI = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), trunkM, NT);
-        const coneG = new THREE.ConeGeometry(1, 1, 6), coI = [];
-        for (let k = 0; k < 6; k++)
-            coI.push(new THREE.InstancedMesh(coneG, new THREE.MeshLambertMaterial({ flatShading: true, map: leafTex }), NT));
-        let n = 0;
-        const put = (x, z) => {
-            const th = 16 + Math.random() * 14, w = Math.max(1, th / 18), y = H(x, z), ry = Math.random() * 3;
-            o.position.set(x, y + th * .175, z);
-            o.rotation.set(0, ry, 0);
-            o.scale.set(.9 * w, th * .35, .9 * w);
-            o.updateMatrix();
-            trI.setMatrixAt(n, o.matrix);
-            for (let k = 0; k < 6; k++) {
-                const f = k / 6, rad = (4.2 - 3.6 * f) * (th / 18);
-                o.position.set(x, y + th * .28 + f * th * .68, z);
-                o.rotation.set(0, ry, 0);
-                o.scale.set(rad, th * .24, rad);
-                o.updateMatrix();
-                coI[k].setMatrixAt(n, o.matrix);
-                coI[k].setColorAt(n, pc[n % 3]);
+        const EP = CONFIG.world.edgePines, NE = Math.round(EP.count * (IS_MOBILE ? EP.mobileFactor : 1)), NS = Math.floor(WS / EP.rowGap) + 1, pc = PINE_COLS.map(c => new THREE.Color(c));
+        const CH = EP.chunk || 90, cells = new Map();
+        const put = (x, z, row) => {
+            const th = 16 + Math.random() * 14, y = H(x, z), key = Math.floor((x + WH) / CH) + ',' + Math.floor((z + WH) / CH);
+            let c = cells.get(key);
+            if (!c) {
+                c = { rows: [], strip: [] };
+                cells.set(key, c);
             }
-            n++;
+            (row ? c.rows : c.strip).push({ x, y, z, th, ry: Math.random() * 3 });
         };
         // fileira contínua na beira (sem pular o corredor, para não abrir falha); cantos cobertos pela sobreposição dos lados
         const eR = WH - EP.inset;
         for (let i = 0; i < NS; i++) {
             const t = -WH + i * EP.rowGap;
-            put(t, -eR);
-            put(t, eR);
-            put(-eR, t);
-            put(eR, t);
+            put(t, -eR, true);
+            put(t, eR, true);
+            put(-eR, t, true);
+            put(eR, t, true);
         }
         // faixa aleatória atrás da fileira
         for (let q = 0; q < NE;) {
@@ -259,14 +247,62 @@
             const x = side === 2 ? -e : side === 3 ? e : t, z = side === 0 ? -e : side === 1 ? e : t;
             if (inCorridor(x, z, 2))
                 continue;
-            put(x, z);
+            put(x, z, false);
             q++;
         }
-        for (const mm of [trI, ...coI]) {
-            mm.frustumCulled = false;
-            scene.add(mm);
-            perfReg(mm, .45, 4 * NS);
-            HQC.push(mm);
+        // pinheiro de referência (th = 18): 6 cones fundidos numa geometria só (posição, normal, uv), escala uniforme por instância = th/18
+        const coneBase = (() => {
+            const P = [], N = [], U = [], I = [];
+            let off = 0;
+            for (let k = 0; k < 6; k++) {
+                const f = k / 6, rad = 4.2 - 3.6 * f, g = new THREE.ConeGeometry(1, 1, 6);
+                g.applyMatrix4(new THREE.Matrix4().makeScale(rad, 4.32, rad));
+                g.applyMatrix4(new THREE.Matrix4().makeTranslation(0, 5.04 + f * 12.24, 0));
+                P.push(...g.attributes.position.array);
+                N.push(...g.attributes.normal.array);
+                U.push(...g.attributes.uv.array);
+                for (const ix of g.index.array)
+                    I.push(ix + off);
+                off += g.attributes.position.count;
+            }
+            const G = new THREE.BufferGeometry();
+            G.setAttribute('position', new THREE.Float32BufferAttribute(P, 3));
+            G.setAttribute('normal', new THREE.Float32BufferAttribute(N, 3));
+            G.setAttribute('uv', new THREE.Float32BufferAttribute(U, 2));
+            G.setIndex(I);
+            return G;
+        })();
+        const coneM = new THREE.MeshLambertMaterial({ flatShading: true, map: leafTex }), o = new THREE.Object3D(), bb = new THREE.Box3(), v3 = new THREE.Vector3();
+        for (const c of cells.values()) {
+            const L = c.rows.concat(c.strip), n = L.length;
+            const tG = new THREE.BoxGeometry(1, 1, 1), cG = coneBase.clone();
+            const trI = new THREE.InstancedMesh(tG, trunkM, n), coI = new THREE.InstancedMesh(cG, coneM, n);
+            bb.makeEmpty();
+            L.forEach((p, i) => {
+                const w = Math.max(1, p.th / 18), sc = p.th / 18;
+                o.position.set(p.x, p.y + p.th * .175, p.z);
+                o.rotation.set(0, p.ry, 0);
+                o.scale.set(.9 * w, p.th * .35, .9 * w);
+                o.updateMatrix();
+                trI.setMatrixAt(i, o.matrix);
+                o.position.set(p.x, p.y, p.z);
+                o.scale.set(sc, sc, sc);
+                o.updateMatrix();
+                coI.setMatrixAt(i, o.matrix);
+                coI.setColorAt(i, pc[i % 3]);
+                bb.expandByPoint(v3.set(p.x - 8, p.y, p.z - 8));
+                bb.expandByPoint(v3.set(p.x + 8, p.y + p.th, p.z + 8));
+            });
+            const sph = new THREE.Sphere();
+            bb.getBoundingSphere(sph);
+            tG.boundingSphere = sph.clone();
+            cG.boundingSphere = sph.clone();
+            for (const mm of [trI, coI]) {
+                scene.add(mm);
+                EDGE_MESHES.push(mm);
+                perfReg(mm, .45, c.rows.length); // a fileira (primeiras instâncias do chunk) é preservada; a faixa aleatória é reduzida
+                HQC.push(mm);
+            }
         }
     }
     if (END_TREES.length) {

@@ -1,13 +1,66 @@
 // ARQUIVO: MAIN LOOP (tick: física, câmera, render).
     // ===== MAIN LOOP: tick (física, câmera, render) =====
     let petAcc = 0, petFr = 0;
+    // ===== LIMITADOR DE FPS (mobile): mede o intervalo do requestAnimationFrame nos primeiros 40 callbacks (RAF_D). Só limita em telas >= ~100 Hz (120 Hz -> 60 fps, pulando 1 em cada 2); em 60/90 Hz NÃO pula quadro (o antigo corte fixo de 15,2 ms perdia quadros por jitter em 60 Hz e dava 45 fps em 90 Hz). CONFIG.gfx.maxFps = 0 desliga =====
+    const RAF_D = [];
+    let rafPrev = 0, rafThr = 0, rafRi = 0;
+    function frameSkip(now) {
+        if (rafPrev && RAF_D.length < 40) {
+            RAF_D.push(now - rafPrev);
+            if (RAF_D.length === 40) {
+                rafRi = RAF_D.slice().sort((a, b) => a - b)[10];
+                const mf = CONFIG.gfx.maxFps;
+                rafThr = mf > 0 && rafRi < 620 / mf ? 750 / mf : 0;
+            }
+        }
+        rafPrev = now;
+        return rafThr > 0 && now - lastFrameT < rafThr;
+    }
+    // ===== DEBUG DE DESEMPENHO (só com ?debug=1 na URL): linha com FPS/calls/triângulos/ms de JS/Hz e botão TESTE que desliga partes da cena, uma a uma, para achar o gargalo no próprio celular =====
+    const DBG = /[?&]debug=1/.test(location.search);
+    const DBG_SAVE = new Map(), DBG_NAMES = ['normal', 'sem grama/flores/juncos/pétalas', '+ sem pinheiros da borda', '+ sem floresta (anel)', '+ sem céu', '+ cena vazia (só limpa a tela)', '+ sem render (só JS)'];
+    let dbgStep = 0, dbgMs = 0, dbgBtn = null, dbgInfo = null;
+    function dbgApply() {
+        for (const [o, v] of DBG_SAVE)
+            o.visible = v;
+        DBG_SAVE.clear();
+        const hide = o => { if (!DBG_SAVE.has(o))
+            DBG_SAVE.set(o, o.visible); o.visible = false; };
+        VEG_ON = dbgStep < 1; // vegCull() (world.js) mantém os chunks de vegetação escondidos
+        if (dbgStep >= 1)
+            scene.traverse(o => { if ((o.isInstancedMesh && !EDGE_MESHES.includes(o) && !TREE_INST.includes(o)) || o.isPoints)
+                hide(o); });
+        if (dbgStep >= 2)
+            EDGE_MESHES.forEach(hide);
+        if (dbgStep >= 3)
+            TREE_INST.forEach(hide);
+        if (dbgStep >= 4)
+            hide(sky);
+        if (dbgStep >= 5)
+            hide(scene);
+        dbgBtn.textContent = 'TESTE ' + dbgStep + ': ' + DBG_NAMES[dbgStep] + ' (toque p/ avançar)';
+    }
+    if (DBG) {
+        renderer.info.autoReset = false;
+        const st = 'position:fixed;left:50%;transform:translateX(-50%);z-index:99999;background:rgba(0,0,0,.72);color:#fff;font:13px/1.3 monospace;padding:8px 12px;border-radius:8px;text-align:center;user-select:none;-webkit-user-select:none;';
+        dbgInfo = document.createElement('div');
+        dbgInfo.style.cssText = st + 'top:6px;pointer-events:none;';
+        dbgBtn = document.createElement('div');
+        dbgBtn.style.cssText = st + 'top:46px;';
+        document.body.append(dbgInfo, dbgBtn);
+        const nx = e => { e.preventDefault(); e.stopPropagation(); dbgStep = (dbgStep + 1) % DBG_NAMES.length; dbgApply(); };
+        dbgBtn.addEventListener('touchstart', nx, { passive: false });
+        dbgBtn.addEventListener('click', nx);
+        dbgApply();
+    }
     function tick(now) {
         requestAnimationFrame(tick);
         if (IS_MOBILE) {
-            if (now - lastFrameT < 15.2)
+            if (frameSkip(now))
                 return;
             lastFrameT = now;
         }
+        const dbgT0 = DBG ? performance.now() : 0;
         if (IS_MOBILE)
             mobileFrame();
         const dt = Math.min(.05, (now - last) / 1000);
@@ -317,27 +370,40 @@
         impactUpdate(dt);
         if (hqOn)
             sunFollow();
-        cam.layers.set(0);
-        renderer.render(scene, cam);
-        {
-            const ac = renderer.autoClearColor, ad = renderer.autoClearDepth, su = renderer.shadowMap.autoUpdate;
-            renderer.autoClearColor = false;
-            renderer.autoClearDepth = false;
-            renderer.shadowMap.autoUpdate = false;
-            renderer.clearDepth();
-            cam.layers.set(1);
-            renderer.render(scene, cam);
+        vegCull();
+        if (DBG)
+            renderer.info.reset();
+        if (!(DBG && dbgStep >= 6)) {
             cam.layers.set(0);
-            renderer.autoClearColor = ac;
-            renderer.autoClearDepth = ad;
-            renderer.shadowMap.autoUpdate = su;
+            renderer.render(scene, cam);
+            {
+                // 2ª passada (braços/espada, layer 1): as matrizes já foram atualizadas na 1ª, então não refaz o updateMatrixWorld da cena inteira
+                const ac = renderer.autoClearColor, ad = renderer.autoClearDepth, su = renderer.shadowMap.autoUpdate, sa = scene.autoUpdate;
+                renderer.autoClearColor = false;
+                renderer.autoClearDepth = false;
+                renderer.shadowMap.autoUpdate = false;
+                scene.autoUpdate = false;
+                renderer.clearDepth();
+                cam.layers.set(1);
+                renderer.render(scene, cam);
+                cam.layers.set(0);
+                renderer.autoClearColor = ac;
+                renderer.autoClearDepth = ad;
+                renderer.shadowMap.autoUpdate = su;
+                scene.autoUpdate = sa;
+            }
         }
+        if (DBG)
+            dbgMs += (performance.now() - dbgT0 - dbgMs) * .05;
         fpsN++;
         const nowS = performance.now();
         if (nowS - fpsStart >= 500) {
             if (cv.clientWidth !== lastCW || cv.clientHeight !== lastCH)
                 size();
-            fpsEl.textContent = 'FPS ' + Math.round(fpsN * 1000 / (nowS - fpsStart));
+            const fpsV = Math.round(fpsN * 1000 / (nowS - fpsStart));
+            fpsEl.textContent = 'FPS ' + fpsV;
+            if (DBG)
+                dbgInfo.textContent = 'FPS ' + fpsV + ' | gráf ' + (perfOn ? 'LOW' : hqOn ? 'HIGH' : 'MID') + ' | calls ' + renderer.info.render.calls + ' | tris ' + Math.round(renderer.info.render.triangles / 1000) + 'k | JS ' + dbgMs.toFixed(1) + ' ms | tela ' + (rafRi ? Math.round(1000 / rafRi) + ' Hz' : '...') + (rafThr ? ' (limitado)' : '');
             fpsN = 0;
             fpsStart = nowS;
         }
