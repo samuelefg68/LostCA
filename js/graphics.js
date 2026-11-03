@@ -184,9 +184,9 @@
             for (const o of HQR)
                 flag(o, false);
             groundMesh.receiveShadow = hqOn;
-            hemi.intensity = gfxCaveOn ? CUBL.hemiK : hqOn ? .6 : .95;
+            hemi.intensity = inColiseum ? COLI_HEMI : gfxCaveOn ? CUBL.hemiK : hqOn ? .6 : .95; // coliseu: luz ambiente = coliseum.hemiK
             dl.intensity = hqOn ? 1.9 : 1.1;
-            fill.visible = hqOn && (!gfxCaveOn || CUBL.hqFill);
+            fill.visible = hqOn && !inColiseum && (!gfxCaveOn || CUBL.hqFill); // sem luz de preenchimento no coliseu
             renderer.toneMapping = hqOn ? THREE.ACESFilmicToneMapping : THREE.NoToneMapping;
             renderer.toneMappingExposure = 1.25;
             if (hqOn)
@@ -212,7 +212,7 @@
             gfxCaveOn = on;
             if (!hqOn)
                 return;
-            fill.visible = !on || CUBL.hqFill;
+            fill.visible = !inColiseum && (!on || CUBL.hqFill);
             setEnv(!on || CUBL.hqEnv);
             if (on && !CUBL.hqEnv && envRT) {
                 envRT.dispose();

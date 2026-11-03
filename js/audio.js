@@ -13,7 +13,9 @@
             actx = new AC();
             master = actx.createGain();
             master.gain.value = volMaster;
-            master.connect(actx.destination);
+            muteG = actx.createGain(); // mudo geral: master -> muteG -> saída; vai a 0 enquanto o caiu.mp3 toca (ver fallPlay). Fica separado dos volumes do menu (master/mus/sfx/ui) para não brigar com as configurações
+            muteG.connect(actx.destination);
+            master.connect(muteG);
             musBus = actx.createGain();
             musBus.gain.value = volMus;
             musBus.connect(master);
@@ -32,6 +34,9 @@
             cubBgmGain = actx.createGain();
             cubBgmGain.connect(musBus);
             cubBgmGain.gain.value = CONFIG.audio.cubeBgmGain;
+            lutGain = actx.createGain();
+            lutGain.connect(musBus);
+            lutGain.gain.value = CONFIG.audio.lutaBgmGain;
             stepLoad();
             swordLoad();
             impactLoad();
@@ -40,6 +45,8 @@
             loadAudio(BGM_URL, b => { bgmBuf = b; bgmStart(); }, 'música');
             loadAudio(CONFIG.paths.bridgeBgm, b => { brBgmBuf = b; if (brBgmWant) bridgeBgmStart(); }, 'música da ponte');
             loadAudio(CONFIG.paths.cubeBgm, b => { cubBgmBuf = b; if (cubBgmWant) cubeBgmStart(); }, 'música do cubo');
+            loadAudio(CONFIG.paths.comemora, b => { comBuf = b; }, 'som da plateia');
+            loadAudio(CONFIG.paths.luta, b => { lutBuf = b; if (lutWant) lutaBgmStart(); }, 'música da luta');
         }
         catch (e) {
             console.warn('música indisponível', e);
@@ -94,8 +101,23 @@
     }
     // cubo (chamada por enterCube, cube.js): a música da ponte (ou a do jogo, se vier direto, p.ex. pelo teleporte) some com fade de audio.cubeFadeOut s e DEPOIS começa castelo.mp3 em loop (volume audio.cubeBgmGain, pelo musBus)
     let cubBgmGain = null, cubBgmBuf = null, cubBgmSrc = null, cubBgmWant = false, cubBgmAt = 0;
+    // castelo.mp3 só começa DEPOIS do caiu.mp3 (queda da ponte): fallState 0 = sem queda (ex.: teleporte), 1 = derrubou.mp3 tocado (queda em andamento), 2 = caiu.mp3 tocando, 3 = caiu.mp3 terminou. cubBgmHold = castelo.mp3 pedido por cubeBgmPlay() mas segurado até o fim do caiu.mp3
+    let cubBgmHold = false, fallState = 0, muteG = null, knockBusy = false;
+    // libera o castelo.mp3 segurado: só quando derrubou.mp3 E caiu.mp3 já terminaram (chamada no fim de cada um)
+    function cubeBgmRelease() { if (cubBgmHold && fallState === 3 && !knockBusy) { cubBgmHold = false; cubeBgmStart(); } }
+    function fallDlgMute() { if (fallState === 1) muteAll(true); } // chamada por startDlg (dialogue.js): fallState 1 = derrubou.mp3 já tocou, então o diálogo que abre agora é o "Você caiu."; o mudo vai até o fim do caiu.mp3 (fallPlay)
+    function muteAll(on) { // silencia TODOS os sons do jogo (música, passos, espada, UI...) com uma rampa curta; o caiu.mp3 liga direto na saída e não passa por aqui
+        if (!actx || !muteG) return;
+        try {
+            const t = actx.currentTime, g = muteG.gain;
+            g.cancelScheduledValues(t);
+            g.setValueAtTime(g.value, t);
+            g.linearRampToValueAtTime(on ? 0 : 1, t + .03);
+        }
+        catch (e) { }
+    }
     function cubeBgmStart() {
-        if (!actx || !cubBgmBuf || !cubBgmGain || cubBgmSrc)
+        if (!actx || !cubBgmBuf || !cubBgmGain || cubBgmSrc || cubBgmHold)
             return;
         try {
             cubBgmSrc = actx.createBufferSource();
@@ -110,6 +132,8 @@
         if (cubBgmWant)
             return;
         cubBgmWant = true;
+        // queda em andamento: espera o fim do derrubou.mp3 e do caiu.mp3 (ver cubeBgmRelease). fallState 0 com a música da ponte tocando = veio da ponte (enterCube roda no preto, possivelmente ANTES do derrubou.mp3 começar), então também espera; teleporte direto ao cubo (sem música da ponte) toca na hora
+        cubBgmHold = fallState === 1 || fallState === 2 || (fallState === 0 && !!brBgmSrc);
         bgmOff = true;
         brBgmWant = false; // a música da ponte não pode mais (re)começar
         const fd = CONFIG.audio.cubeFadeOut;
@@ -130,6 +154,67 @@
             brBgmSrc = null;
             cubeBgmStart();
         }
+    }
+    // coliseu: (1) arenaMusicStop(fade) (chamada por enterColiseum, coliseum.js, ao ENTRAR no mapa): TODAS as músicas (jogo, ponte, cubo) somem com fade de `fade` s (audio.arenaFadeOut) e não religam mais; (2) arenaMusicPlay() (chamada por cubeClamp do coliseu quando as LUZES começam a acender): comemora.mp3 (plateia, pelo sfxBus, volume audio.comemoraVol) toca na hora e, quando ACABA, luta.mp3 começa em LOOP (musBus, volume audio.lutaBgmGain). Cada uma roda uma vez só (arenaStopped / arenaOn)
+    let lutGain = null, lutBuf = null, lutSrc = null, lutWant = false, comBuf = null, arenaOn = false, arenaStopped = false;
+    function lutaBgmStart() {
+        if (!actx || !lutBuf || !lutGain || lutSrc || !lutWant)
+            return;
+        try {
+            lutSrc = actx.createBufferSource();
+            lutSrc.buffer = lutBuf;
+            lutSrc.loop = true;
+            lutSrc.connect(lutGain);
+            lutSrc.start();
+            coliseumTitleShow(); // titulo "A Fossa" nos 30 s iniciais da musica (coliseum.js)
+        }
+        catch (e) { lutSrc = null; }
+    }
+    function arenaMusicStop(fade) {
+        if (arenaStopped)
+            return;
+        arenaStopped = true;
+        bgmOff = true;
+        brBgmWant = false;
+        cubBgmHold = true; // castelo.mp3 não pode mais (re)começar
+        if (!actx)
+            return;
+        const t = actx.currentTime, fd = fade || 0;
+        for (const [g, src] of [[bgmGain, bgmSrc], [brBgmGain, brBgmSrc], [cubBgmGain, cubBgmSrc]])
+            if (g && src) {
+                try {
+                    g.gain.cancelScheduledValues(t);
+                    g.gain.setValueAtTime(g.gain.value, t);
+                    g.gain.linearRampToValueAtTime(0, t + fd);
+                    src.stop(t + fd + .05);
+                }
+                catch (e) { }
+            }
+        bgmSrc = null;
+        brBgmSrc = null;
+        cubBgmSrc = null;
+    }
+    function arenaMusicPlay() {
+        if (arenaOn)
+            return;
+        arenaOn = true;
+        arenaMusicStop(0); // garantia (se por algum motivo ainda não parou)
+        // fade in e fade out da plateia: o som passa por um ganho próprio que sobe de 0 a 1 em audio.comemoraFadeIn s no início e desce a 0 em audio.comemoraFadeOut s no fim
+        let dest = sfxBus || master || (actx && actx.destination);
+        if (actx && comBuf) {
+            try {
+                const cg = actx.createGain(), t = actx.currentTime, d = comBuf.duration;
+                const fi = Math.min(CONFIG.audio.comemoraFadeIn, d / 2), fo = Math.min(CONFIG.audio.comemoraFadeOut, d / 2); // cada fade no máximo metade do som
+                cg.gain.setValueAtTime(0, t);
+                cg.gain.linearRampToValueAtTime(1, t + fi);
+                cg.gain.setValueAtTime(1, t + d - fo); // fade out: termina junto com o som, e só então a luta começa
+                cg.gain.linearRampToValueAtTime(0, t + d);
+                cg.connect(dest);
+                dest = cg;
+            }
+            catch (e) { }
+        }
+        playOnce(comBuf, CONFIG.audio.comemoraVol, () => { lutWant = true; lutaBgmStart(); }, dest); // sem buffer, playOnce chama o cb na hora: a luta começa direto
     }
     const STEP_URL = { walk: CONFIG.paths.stepWalk, run: CONFIG.paths.stepRun };
     const STEP_VOL = { walk: CONFIG.audio.stepWalkVol, run: CONFIG.audio.stepRunVol };
@@ -163,7 +248,7 @@
     // sons da queda dos 200 m da ponte (bridge.js): knockdownPlay = derrubou.mp3, tocado assim que a tela fica preta, ANTES do diálogo "Você caiu."; fallPlay = caiu.mp3, tocado DEPOIS do diálogo, antes de clarear.
     // cb roda ao terminar o som (ou na hora, se o som não puder tocar), uma única vez
     let fallBuf = null, knockdownBuf = null;
-    function playOnce(buf, vol, cb) {
+    function playOnce(buf, vol, cb, dest) { // dest = nó de saída (padrão: sfxBus)
         let done = false;
         const fin = () => { if (done) return; done = true; cb(); };
         if (!actx || !buf) { fin(); return; }
@@ -172,15 +257,26 @@
             s.buffer = buf;
             g.gain.value = vol;
             s.connect(g);
-            g.connect(sfxBus || master || actx.destination);
+            g.connect(dest || sfxBus || master || actx.destination);
             s.onended = fin;
             s.start();
             setTimeout(fin, buf.duration * 1000 + 400); // segurança: se onended não disparar, não deixa a tela presa no preto
         }
         catch (e) { fin(); }
     }
-    function fallPlay(cb) { playOnce(fallBuf, CONFIG.audio.fallVol, cb); }
-    function knockdownPlay(cb) { playOnce(knockdownBuf, CONFIG.audio.knockdownVol, cb); }
+    function fallPlay(cb) {
+        fallState = 2;
+        // todos os outros sons ficam mudos enquanto o caiu.mp3 toca; ele sai direto na saída (fora do master) com o volume do menu aplicado à mão
+        const fv = CONFIG.audio.fallVol * (master ? master.gain.value : 1) * (sfxBus ? sfxBus.gain.value : 1);
+        if (fallBuf) muteAll(true);
+        playOnce(fallBuf, fv, () => {
+            muteAll(false); // volta tudo quando acaba (ou se o som falhar)
+            fallState = 3;
+            cubeBgmRelease(); // caiu.mp3 terminou: toca castelo.mp3 (o fade out da música anterior já passou, então começa na hora)
+            cb();
+        }, actx && actx.destination);
+    }
+    function knockdownPlay(cb) { fallState = 1; knockBusy = true; playOnce(knockdownBuf, CONFIG.audio.knockdownVol, () => { knockBusy = false; cubeBgmRelease(); cb(); }); }
     const IMPACT_KINDS = ['tree', 'stone', 'gate'];
     let impactBuf = {}, impactG = null;
     function impactLoad() {

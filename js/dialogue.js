@@ -23,6 +23,8 @@
     }
     function closeDlg() { dlgOn = false; dlgEl.classList.remove('on', 'done'); }
     function startDlg(lines) {
+        if (typeof fallDlgMute === 'function')
+            fallDlgMute(); // audio.js: se a queda da ponte está em andamento, este é o diálogo "Você caiu.": silencia todo o áudio até o fim do caiu.mp3
         DLG_LINES = lines;
         dlgI = 0;
         DLG_TEXT = DLG_LINES[0];
