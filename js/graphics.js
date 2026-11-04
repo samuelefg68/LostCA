@@ -171,6 +171,8 @@
                 m.needsUpdate = true;
             }
         };
+        // reflexo (envMap) ligado? coliseu: coliseum.hqEnv (recapturado com o céu da NOITE em gfxCave); cubo: cube.light.hqEnv; resto: sempre
+        const envOn = () => inColiseum ? CONFIG.coliseum.hqEnv !== false : (!gfxCaveOn || CUBL.hqEnv);
         const flag = (root, c) => root.traverse(o => { if (o.isMesh) {
             if (c)
                 o.castShadow = hqOn;
@@ -198,10 +200,10 @@
             if (init) {
                 if (hqOn)
                     setTimeout(() => { if (hqOn)
-                        setEnv(true); }, 900);
+                        setEnv(envOn()); }, 900); // respeita o modo caverna: no boot do teleporte (enterCube já rodou), ligar o reflexo aqui deixava braço/espada cinza
             }
             else {
-                setEnv(hqOn && (!gfxCaveOn || CUBL.hqEnv));
+                setEnv(hqOn && envOn());
                 scene.traverse(o => { if (o.material)
                     (Array.isArray(o.material) ? o.material : [o.material]).forEach(m => { m.needsUpdate = true; }); });
             }
@@ -213,8 +215,12 @@
             if (!hqOn)
                 return;
             fill.visible = !inColiseum && (!on || CUBL.hqFill);
-            setEnv(!on || CUBL.hqEnv);
-            if (on && !CUBL.hqEnv && envRT) {
+            if (inColiseum && envRT) { // o reflexo guardado é do pôr do sol do mapa antigo: descarta e recaptura com o céu de noite do coliseu (enterColiseum já ligou o céu)
+                envRT.dispose();
+                envRT = null;
+            }
+            setEnv(envOn());
+            if (on && !envOn() && envRT) {
                 envRT.dispose();
                 envRT = null;
             }
@@ -301,6 +307,8 @@
         document.head.appendChild(st);
     }
     const mB = { atk: document.getElementById('mAtk'), jump: document.getElementById('mJump'), run: document.getElementById('mRun'), crouch: document.getElementById('mCrouch'), inter: document.getElementById('mInter'), pause: document.getElementById('mPause'), dash: document.getElementById('mDash') };
+    let mobBlock = false, mBlockEl = null, mAreaEl = null; // mAreaEl = botao AREA (ataque em area)
+    // botoes de BLOQUEIO (#mBlock) e AREA (#mArea) do celular, criados em JS abaixo; main.js le mobBlock, areaQ/areaCdEnd sao de main.js
     let wasActive = null, jid = null, jcx = 0, jcy = 0, jR = 60;
     function joyReset() { joy.x = joy.y = joy.m = 0; jid = null; mjb.style.left = mjb.style.top = mjb.style.bottom = ''; mjb.classList.remove('hold'); mjt.style.transform = ''; }
     function mobileFrame() {
@@ -317,6 +325,12 @@
         mB.inter.classList.toggle('show', !!(nearK || nearF || nearD) && !dlgOn && !fly);
         mB.dash.classList.toggle('off', corrBoxT() >= 0 || brNoDash);
         mB.run.classList.toggle('off', brNoRun);
+        if (mBlockEl)
+            mBlockEl.style.display = inColiseum && !dlgOn ? 'flex' : 'none'; // so existe no coliseu
+        if (mAreaEl) {
+            mAreaEl.style.display = inColiseum && !dlgOn ? 'flex' : 'none';
+            mAreaEl.style.opacity = performance.now() < areaCdEnd ? .4 : 1; // esmaecido durante a recarga
+        }
     }
     if (IS_MOBILE) {
         {
@@ -420,6 +434,29 @@
             pause(); });
         btn(mB.dash, () => { if (active)
             dashQ = true; });
+        {
+            // botao BLOQUEAR (segurar): criado em JS (sem index.html/style.css); ajuste right/bottom ao layout dos outros botoes
+            const e = document.createElement('div');
+            e.id = 'mBlock';
+            e.textContent = 'BLOQ';
+            e.style.cssText = 'position:fixed;z-index:3;right:calc(24px*var(--m,1));bottom:calc(190px*var(--m,1));width:calc(64px*var(--m,1));height:calc(64px*var(--m,1));border-radius:50%;display:none;align-items:center;justify-content:center;background:rgba(40,60,110,.55);border:3px solid rgba(255,255,255,.6);color:#fff;font:700 13px ui-monospace,monospace;user-select:none;-webkit-user-select:none;touch-action:none;';
+            document.body.appendChild(e);
+            mBlockEl = e;
+            const a = document.createElement('div');
+            a.id = 'mArea';
+            a.textContent = 'AREA';
+            a.style.cssText = e.style.cssText.replace('bottom:calc(190px', 'bottom:calc(270px').replace('rgba(40,60,110,.55)', 'rgba(120,40,40,.55)');
+            document.body.appendChild(a);
+            mAreaEl = a;
+            a.addEventListener('pointerdown', ev => { ev.preventDefault(); ev.stopPropagation(); if (active && !dlgOn)
+                areaQ = performance.now(); });
+            e.addEventListener('pointerdown', ev => { ev.preventDefault(); ev.stopPropagation(); if (active)
+                mobBlock = true; });
+            const up = () => { mobBlock = false; };
+            e.addEventListener('pointerup', up);
+            e.addEventListener('pointercancel', up);
+            e.addEventListener('pointerleave', up);
+        }
         dlgEl.addEventListener('pointerdown', e => { e.preventDefault(); if (active)
             interact(); });
         document.addEventListener('visibilitychange', () => { if (document.hidden && active)

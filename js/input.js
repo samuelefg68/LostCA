@@ -79,6 +79,8 @@
                 document.body.classList.toggle('noui');
             return;
         }
+        if (e.code === 'ControlLeft' || e.code === 'ControlRight') // Ctrl NÃO agacha mais (Ctrl+W fechava a aba): a tecla é ignorada, então keys.ControlLeft/Right nunca ficam ligadas; agachar = C
+            return;
         keys[e.code] = 1;
         shiftOn = e.shiftKey;
         if (e.code === 'KeyQ' && !e.repeat && active)
@@ -119,7 +121,8 @@
         yaw -= e.movementX * .0022 * sens;
         pitch = Math.max(-1.45, Math.min(1.45, pitch - e.movementY * .0022 * sens));
     } });
-    cv.addEventListener('mousedown', () => { if (!active)
+    cv.addEventListener('contextmenu', e => e.preventDefault()); // botao direito = ataque em area (sem menu do navegador)
+    cv.addEventListener('mousedown', e => { if (!active)
         return; if (document.pointerLockElement !== cv) {
         try {
             const r = cv.requestPointerLock();
@@ -127,7 +130,13 @@
                 r.catch(() => { });
         }
         catch (e) { }
-    } drag = document.pointerLockElement !== cv; if (!dlgOn)
+        if (typeof kbLock === 'function')
+            kbLock(); // audio.js: tela cheia + Keyboard Lock (Ctrl+W); cobre o boot do teleporte, que não tem gesto
+    } drag = document.pointerLockElement !== cv; if (e.button === 2) { // botao direito: ataque em area (main.js, so no coliseu)
+        if (!dlgOn)
+            areaQ = performance.now();
+    }
+    else if (!dlgOn)
         atkQ = performance.now(); });
     addEventListener('mouseup', () => { drag = false; });
     function loadAudio(url, cb, tag) {

@@ -14,7 +14,13 @@
             master = actx.createGain();
             master.gain.value = volMaster;
             muteG = actx.createGain(); // mudo geral: master -> muteG -> saída; vai a 0 enquanto o caiu.mp3 toca (ver fallPlay). Fica separado dos volumes do menu (master/mus/sfx/ui) para não brigar com as configurações
-            muteG.connect(actx.destination);
+            pauseF = actx.createBiquadFilter(); // abafamento da pausa: muteG -> pauseF (passa-baixa) -> pauseG (volume) -> saída; fora da pausa fica aberto (22 kHz, ganho 1)
+            pauseF.type = 'lowpass';
+            pauseF.frequency.value = 22000;
+            pauseG = actx.createGain();
+            muteG.connect(pauseF);
+            pauseF.connect(pauseG);
+            pauseG.connect(actx.destination);
             master.connect(muteG);
             musBus = actx.createGain();
             musBus.gain.value = volMus;
@@ -40,7 +46,8 @@
             stepLoad();
             swordLoad();
             impactLoad();
-            loadAudio(CONFIG.paths.fall, b => { fallBuf = b; }, 'som da queda');
+            loadAudio(CONFIG.paths.dash, b => { dashBuf = b; }, 'dash');
+            loadAudio(CONFIG.paths.fall,b => { fallBuf = b; }, 'som da queda');
             loadAudio(CONFIG.paths.knockdown, b => { knockdownBuf = b; }, 'som da derrubada');
             loadAudio(BGM_URL, b => { bgmBuf = b; bgmStart(); }, 'música');
             loadAudio(CONFIG.paths.bridgeBgm, b => { brBgmBuf = b; if (brBgmWant) bridgeBgmStart(); }, 'música da ponte');
@@ -106,6 +113,22 @@
     // libera o castelo.mp3 segurado: só quando derrubou.mp3 E caiu.mp3 já terminaram (chamada no fim de cada um)
     function cubeBgmRelease() { if (cubBgmHold && fallState === 3 && !knockBusy) { cubBgmHold = false; cubeBgmStart(); } }
     function fallDlgMute() { if (fallState === 1) muteAll(true); } // chamada por startDlg (dialogue.js): fallState 1 = derrubou.mp3 já tocou, então o diálogo que abre agora é o "Você caiu."; o mudo vai até o fim do caiu.mp3 (fallPlay)
+    // PAUSA: todos os sons (passam por master -> muteG) ficam abafados (passa-baixa em audio.pauseCutoff Hz) e mais baixos (ganho audio.pauseGain) em audio.pauseTime s; ao continuar voltam ao normal. O caiu.mp3 liga direto na saída e não é afetado
+    let pauseF = null, pauseG = null;
+    function pauseMuffle(on) {
+        if (!actx || !pauseF || !pauseG)
+            return;
+        try {
+            const A = CONFIG.audio, t = actx.currentTime, d = A.pauseTime != null ? A.pauseTime : .15;
+            pauseF.frequency.cancelScheduledValues(t);
+            pauseF.frequency.setValueAtTime(pauseF.frequency.value, t);
+            pauseF.frequency.linearRampToValueAtTime(on ? (A.pauseCutoff || 600) : 22000, t + d);
+            pauseG.gain.cancelScheduledValues(t);
+            pauseG.gain.setValueAtTime(pauseG.gain.value, t);
+            pauseG.gain.linearRampToValueAtTime(on ? (A.pauseGain != null ? A.pauseGain : .35) : 1, t + d);
+        }
+        catch (e) { }
+    }
     function muteAll(on) { // silencia TODOS os sons do jogo (música, passos, espada, UI...) com uma rampa curta; o caiu.mp3 liga direto na saída e não passa por aqui
         if (!actx || !muteG) return;
         try {
@@ -167,6 +190,7 @@
             lutSrc.connect(lutGain);
             lutSrc.start();
             coliseumTitleShow(); // titulo "A Fossa" nos 30 s iniciais da musica (coliseum.js)
+            coliseumCubesStart(); // cubos verdes: 1a leva `cubes.delay` s depois (coliseum.js)
         }
         catch (e) { lutSrc = null; }
     }
@@ -216,6 +240,39 @@
         }
         playOnce(comBuf, CONFIG.audio.comemoraVol, () => { lutWant = true; lutaBgmStart(); }, dest); // sem buffer, playOnce chama o cb na hora: a luta começa direto
     }
+    // VITORIA (chamada por coliseumCubesUpdate, coliseum.js, quando o ULTIMO goblin da ULTIMA leva morre; 1 vez so): a luta.mp3 faz fade out (audio.victoryFade, padrao = audio.arenaFadeOut, 1,5 s) e para de vez (lutWant = false: nao reinicia) e a plateia (comemora.mp3) toca de novo, com o mesmo fade in/out de arenaMusicPlay, mas SEM começar a luta no fim (a arena fica em silencio)
+    let victoryOn = false;
+    function arenaVictory() {
+        if (victoryOn)
+            return;
+        victoryOn = true;
+        lutWant = false;
+        if (actx && lutGain && lutSrc) {
+            try {
+                const t = actx.currentTime, fd = CONFIG.audio.victoryFade !== undefined ? CONFIG.audio.victoryFade : (CONFIG.audio.arenaFadeOut || 1.5);
+                lutGain.gain.cancelScheduledValues(t);
+                lutGain.gain.setValueAtTime(lutGain.gain.value, t);
+                lutGain.gain.linearRampToValueAtTime(0, t + fd);
+                lutSrc.stop(t + fd + .05);
+            }
+            catch (e) { }
+        }
+        let dest = sfxBus || master || (actx && actx.destination);
+        if (actx && comBuf) {
+            try {
+                const cg = actx.createGain(), t = actx.currentTime, d = comBuf.duration;
+                const fi = Math.min(CONFIG.audio.comemoraFadeIn, d / 2), fo = Math.min(CONFIG.audio.comemoraFadeOut, d / 2);
+                cg.gain.setValueAtTime(0, t);
+                cg.gain.linearRampToValueAtTime(1, t + fi);
+                cg.gain.setValueAtTime(1, t + d - fo);
+                cg.gain.linearRampToValueAtTime(0, t + d);
+                cg.connect(dest);
+                dest = cg;
+            }
+            catch (e) { }
+        }
+        playOnce(comBuf, CONFIG.audio.comemoraVol, () => { try { coliseumVictoryEnd(); } catch (e) { } }, dest); // quando a plateia acaba: fade para preto + recarrega a pagina (volta ao menu, do zero; coliseum.js)
+    }
     const STEP_URL = { walk: CONFIG.paths.stepWalk, run: CONFIG.paths.stepRun };
     const STEP_VOL = { walk: CONFIG.audio.stepWalkVol, run: CONFIG.audio.stepRunVol };
     let stepG = {}, stepCur = null;
@@ -260,7 +317,9 @@
             g.connect(dest || sfxBus || master || actx.destination);
             s.onended = fin;
             s.start();
-            setTimeout(fin, buf.duration * 1000 + 400); // segurança: se onended não disparar, não deixa a tela presa no preto
+            // segurança: se onended não disparar, não deixa a tela presa no preto. Só conta enquanto o contexto roda (na pausa o áudio é suspenso; um setTimeout comum dispararia durante a pausa e adiantaria, p.ex., a luta.mp3)
+            let left = buf.duration * 1000 + 400;
+            const iv = setInterval(() => { if (done) { clearInterval(iv); return; } if (actx.state === 'running') { left -= 250; if (left <= 0) { clearInterval(iv); fin(); } } }, 250);
         }
         catch (e) { fin(); }
     }
@@ -277,6 +336,10 @@
         }, actx && actx.destination);
     }
     function knockdownPlay(cb) { fallState = 1; knockBusy = true; playOnce(knockdownBuf, CONFIG.audio.knockdownVol, () => { knockBusy = false; cubeBgmRelease(); cb(); }); }
+    function knockdownSolo() { // GAME OVER do coliseu (coliseum.js): mesmo efeito da PAUSA no áudio (pauseMuffle(true): tudo abafado e mais baixo) e o derrubou.mp3 toca por cima, direto na saída (fora de master/muteG/pauseF, como o caiu.mp3) com knockdownVol x volume master x volume sfx do menu calculados na hora; NÃO mexe em fallState/knockBusy (da queda da ponte); sem buffer não toca
+        pauseMuffle(true);
+        playOnce(knockdownBuf, CONFIG.audio.knockdownVol * (master ? master.gain.value : 1) * (sfxBus ? sfxBus.gain.value : 1), () => { }, actx && actx.destination);
+    }
     const IMPACT_KINDS = ['tree', 'stone', 'gate'];
     let impactBuf = {}, impactG = null;
     function impactLoad() {
@@ -296,24 +359,21 @@
     }
     catch (e) { } }
 // SOM DO DASH
-const dashAudio = new Audio(CONFIG.paths.dash);
-dashAudio.preload = 'auto';
-
+// Web Audio (buffer pré-decodificado em bgmInit, pelo sfxBus), como espada/impacto: o antigo <audio> com pause()/currentTime/play() a cada dash custava 5-10 fps no celular
+let dashBuf = null, dashG = null;
 function dashPlay() {
+    if (!actx || !dashBuf)
+        return;
     try {
-        dashAudio.pause();
-        dashAudio.currentTime = 0;
-
-        dashAudio.volume = Math.max(
-            0,
-            Math.min(1, volMaster * volSfx * CONFIG.audio.dashVol)
-        );
-
-        const playback = dashAudio.play();
-
-        if (playback && playback.catch) {
-            playback.catch(() => {});
+        if (!dashG) {
+            dashG = actx.createGain();
+            dashG.gain.value = CONFIG.audio.dashVol;
+            dashG.connect(sfxBus || master || actx.destination);
         }
+        const s = actx.createBufferSource();
+        s.buffer = dashBuf;
+        s.connect(dashG);
+        s.start();
     } catch (e) {}
 }
 const wooshAudio = new Audio(CONFIG.paths.woosh);
@@ -443,18 +503,50 @@ function wooshPlay() {
     function stepSet(kind) { if (kind === stepCur || !actx)
         return; stepCur = kind; const t = actx.currentTime; for (const k in stepG)
         stepG[k].gain.setTargetAtTime(k === kind ? STEP_VOL[k] : 0, t, .08); }
-    ['pointerdown', 'keydown', 'touchstart'].forEach(ev => addEventListener(ev, () => { if (!bgmWant)
+    ['pointerdown', 'keydown', 'touchstart'].forEach(ev => addEventListener(ev, () => { if (paused)
+        return; // pausado: só o botão Continuar (start) religa o áudio
+    if (!bgmWant)
         bgmPlay();
     else if (actx && actx.state === 'suspended')
         actx.resume(); }, { passive: true }));
     document.addEventListener('visibilitychange', () => { if (!actx || !bgmWant)
         return; if (document.hidden)
         actx.suspend();
-    else
+    else if (!paused)
         actx.resume(); });
+    // PC: tela cheia + Keyboard Lock (Chrome/Edge): com as teclas de jogo travadas, atalhos do navegador como Ctrl+W (agachar + andar) chegam ao jogo em vez de fechar a aba. Precisa de gesto do usuário (clique/tecla) e de tela cheia; sem suporte (Firefox/Safari) ou sem gesto, falha em silêncio. Teclas em CONFIG.input.lockKeys (Escape fica de fora de propósito)
+    function kbLock() {
+        const I = CONFIG.input;
+        if (IS_MOBILE || !I || !I.keyboardLock)
+            return;
+        try {
+            const lock = () => { if (navigator.keyboard && navigator.keyboard.lock) {
+                const p = navigator.keyboard.lock(I.lockKeys);
+                if (p && p.catch)
+                    p.catch(() => { });
+            } };
+            if (document.fullscreenElement) {
+                lock();
+                return;
+            }
+            if (!I.autoFullscreen)
+                return; // padrão: NÃO força tela cheia (jogar em janela deve funcionar; o Esc que sai da tela cheia/solta o mouse virava um laço de pausa). O lock só vale se o jogador já estiver em tela cheia (ver fullscreenchange abaixo)
+            const de = document.documentElement;
+            if (de.requestFullscreen) {
+                const r = de.requestFullscreen({ navigationUI: 'hide' });
+                if (r && r.then)
+                    r.then(lock).catch(() => { });
+            }
+        }
+        catch (e) { }
+    }
+    document.addEventListener('fullscreenchange', () => { if (document.fullscreenElement && typeof active !== 'undefined' && active)
+        kbLock(); }); // jogador entrou em tela cheia por conta própria (F11 não conta; só a API): liga o Keyboard Lock
     let paused = false, pausedAt = 0;
     function start() {
         paused = false;
+        if (actx && actx.state === 'suspended') { const r = actx.resume(); if (r && r.catch) r.catch(() => { }); } // religa o áudio suspenso na pausa ANTES do pauseMuffle (a rampa usa o relógio do contexto, parado enquanto suspenso)
+        pauseMuffle(coliGameOver); // game over (coliseum.js): continuar depois de pausar NÃO tira o abafado
         bgmPlay();
         active = true;
         if (dlgOn)
@@ -464,6 +556,7 @@ function wooshPlay() {
         hint.classList.add('on');
         hintT = 6;
         if (!IS_MOBILE) {
+            kbLock();
             try {
                 const r = cv.requestPointerLock();
                 if (r && r.catch)
@@ -489,6 +582,9 @@ function wooshPlay() {
     }
     function pause() {
         paused = true;
+        pauseMuffle(true);
+        // depois do abafado (pauseTime s) SUSPENDE o contexto: música, plateia, passos e demais sons Web Audio congelam e continuam do mesmo ponto, mantendo o beat com os cubos (que usam o dt do jogo)
+        setTimeout(() => { if (paused && actx && actx.state === 'running') actx.suspend().catch(() => { }); }, ((CONFIG.audio.pauseTime != null ? CONFIG.audio.pauseTime : .15) * 1000) + 30);
         pausedAt = performance.now();
         dlgEl.classList.remove('on');
         active = false;

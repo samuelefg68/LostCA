@@ -4,7 +4,7 @@ html,body{margin:0;height:100%;min-height:-webkit-fill-available;background:var(
 canvas{position:fixed;left:0;top:0;width:100vw;height:100vh;height:100dvh;display:block;image-rendering:crisp-edges;image-rendering:pixelated}
 canvas.smooth{image-rendering:auto}
 #vig{position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at center,transparent 55%,rgba(8,20,13,.55) 100%)}
-#ov{position:fixed;inset:0;display:flex;align-items:flex-end;padding:24px;padding-bottom:calc(28px + env(safe-area-inset-bottom,0px));padding-top:calc(24px + env(safe-area-inset-top,0px));background:linear-gradient(to top,rgba(10,22,15,.82),rgba(10,22,15,.15) 70%)}
+#ov{position:fixed;inset:0;z-index:25;display:flex;align-items:flex-end;padding:24px;padding-bottom:calc(28px + env(safe-area-inset-bottom,0px));padding-top:calc(24px + env(safe-area-inset-top,0px));background:linear-gradient(to top,rgba(10,22,15,.82),rgba(10,22,15,.15) 70%)}
 #ov.off{display:none}
 .card{max-width:900px;position:relative;z-index:1}
 .row{display:flex;gap:18px 40px;align-items:flex-start;flex-wrap:wrap}
@@ -16,7 +16,7 @@ canvas.smooth{image-rendering:auto}
 .row dl{margin:0;flex:1 1 320px;max-width:520px}
 button.alt{background:var(--dim);box-shadow:4px 4px 0 #2c5a3a}
 button.alt:hover{box-shadow:2px 2px 0 #2c5a3a}
-#cfg{position:fixed;inset:0;z-index:10;display:none;align-items:center;justify-content:center;background:rgba(6,16,10,.72)}
+#cfg{position:fixed;inset:0;z-index:26;display:none;align-items:center;justify-content:center;background:rgba(6,16,10,.72)}
 #cfg.on{display:flex}
 .cfgbox{width:min(420px,calc(100% - 32px));padding:26px;background:#12241a;border:2px solid #2f7a45;box-shadow:6px 6px 0 #2f7a45}
 .cfgbox h2{margin:0 0 20px;font-size:22px;color:var(--ink);text-shadow:2px 2px 0 #2f7a45}

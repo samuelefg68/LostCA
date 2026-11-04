@@ -1,6 +1,12 @@
 // ARQUIVO: MAIN LOOP (tick: física, câmera, render).
     // ===== MAIN LOOP: tick (física, câmera, render) =====
     let petAcc = 0, petFr = 0;
+    // BLOQUEIO (F no PC, botao #mBlock no celular; so no coliseu): PB = pose da espada levantada (mesmo formato de PI_ em player.js: x, y, z, rotX, rotY, rotZ), blockK = 0..1 suaviza a entrada/saida da pose
+    const PB = [.05, -.35, -1.8, -.1, 0, .15];
+    let blockK = 0;
+    // ATAQUE EM AREA (botao direito / #mArea): areaQ = instante do pedido (buffer), areaSwing 0..1 = progresso da animacao (-1 = parado), areaCdEnd = fim da recarga (ms), areaFx = ja atingiu os cubos neste golpe; PA1/PA2 = poses de preparacao e golpe (formato de PI_), NAO calibradas visualmente
+    let areaQ = -1e9, areaSwing = -1, areaCdEnd = 0, areaFx = false;
+    const PA1 = [.9, .5, -2.6, .4, .6, -.9], PA2 = [-.9, -1.0, -1.8, -1.6, -.6, .5];
     // ===== LIMITADOR DE FPS (mobile): mede o intervalo do requestAnimationFrame nos primeiros 40 callbacks (RAF_D). Só limita em telas >= ~100 Hz (120 Hz -> 60 fps, pulando 1 em cada 2); em 60/90 Hz NÃO pula quadro (o antigo corte fixo de 15,2 ms perdia quadros por jitter em 60 Hz e dava 45 fps em 90 Hz). CONFIG.gfx.maxFps = 0 desliga =====
     const RAF_D = [];
     let rafPrev = 0, rafThr = 0, rafRi = 0;
@@ -69,9 +75,10 @@
         let moving = false, crouch = false;
         if (active) {
             crouch = !!(keys.KeyC || keys.ControlLeft || keys.ControlRight);
-            if (crouch || brNoRun)
+            PLAYER_BLOCK = inColiseum && !!(keys.KeyF || mobBlock) && !dlgOn && !fly && !walkBusy; // coliseum.js: anula dano/knockback dos cubos; aqui tambem impede correr, dash e ataque
+            if (crouch || brNoRun || PLAYER_BLOCK)
                 sprint = false;
-            const run = !brNoRun && (keys.ShiftLeft || keys.ShiftRight || shiftOn || sprint); // brNoRun (bridge.js, depois do 2º diálogo da ponte): correr desligado
+            const run = !brNoRun && !PLAYER_BLOCK && (keys.ShiftLeft || keys.ShiftRight || shiftOn || sprint); // brNoRun (bridge.js, depois do 2º diálogo da ponte): correr desligado
             if (jumpQ > 0)
                 jumpQ -= dt;
             let sp = crouch ? CONFIG.player.crouch : run ? CONFIG.player.run : CONFIG.player.walk;
@@ -100,7 +107,7 @@
             const s = Math.sin(yaw), c = Math.cos(yaw), ppx = px, ppz = pz;
             if (dashQ) {
                 dashQ = false;
-                if (!dlgOn && !fly && !walkBusy && cbT < 0 && !brNoDash && now >= dashCD && dashT <= 0) {
+                if (!dlgOn && !fly && !walkBusy && !PLAYER_BLOCK && cbT < 0 && !brNoDash && now >= dashCD && dashT <= 0) {
                     const df = l ? fx : 1, ds = l ? sx : 0;
                     dashX = -s * df + c * ds;
                     dashZ = -c * df - s * ds;
@@ -125,6 +132,8 @@
                 px += (-s * fx + c * sx) * sp * jm * dt;
                 pz += (-c * fx - s * sx) * sp * jm * dt;
             }
+            if (inColiseum)
+                coliseumPlayerKnock(dt); // empurrão ao levar dano dos cubos (coliseum.js); as colisões abaixo ainda valem
             if (!inBridge && !inCube) {
                 const bx_ = px - ROAD.x, bz_ = pz - ROAD.z, bd_ = Math.hypot(bx_, bz_), bm_ = MAP_R + 4;
                 if (pz < CZ0 && Math.abs(px - CX) < ROAD.hw + 6) {
@@ -243,7 +252,7 @@
             }
         }
         tip.classList.toggle('on', active && (nearK || nearF || nearD) && !dlgOn && !fly);
-        if (dlgOn && dlgN < DLG_TEXT.length) {
+        if (active && dlgOn && dlgN < DLG_TEXT.length) { // só digita o diálogo com o jogo ativo (pausado, o texto não avança nem toca teclas)
             dlgAcc += dt * 1000;
             const n = Math.floor(dlgAcc / 45);
             if (n > 0) {
@@ -257,8 +266,24 @@
         }
         eye += ((crouch ? CONFIG.player.eyeCrouch : CONFIG.player.eyeStand) - eye) * Math.min(1, dt * CONFIG.player.eyeLerp);
         const b = moving && grounded ? Math.sin(bob) : 0;
-        if (swing < 0) {
-            if (atkQ > 0 && now - atkQ < BUFFER && now >= cdEnd && active && !dlgOn && !fly && !walkBusy) {
+        if (swing < 0 && areaSwing < 0 && areaQ > 0 && now - areaQ < BUFFER && now >= areaCdEnd && inColiseum && active && !dlgOn && !fly && !walkBusy && !PLAYER_BLOCK) {
+            areaSwing = 0;
+            areaFx = false;
+            areaQ = -1e9;
+            areaCdEnd = now + CONFIG.coliseum.area.cooldown * 1000;
+            swordPlay(atk);
+        }
+        if (areaSwing >= 0) {
+            areaSwing += dt * 1.1;
+            if (areaSwing >= .5 && !areaFx) {
+                areaFx = true;
+                coliseumCubesArea();
+            }
+            if (areaSwing >= 1)
+                areaSwing = -1;
+        }
+        if (swing < 0 && areaSwing < 0) {
+            if (atkQ > 0 && now - atkQ < BUFFER && now >= cdEnd && active && !dlgOn && !fly && !walkBusy && !PLAYER_BLOCK) {
                 swing = 0;
                 atk ^= 1;
                 swordPlay(atk);
@@ -294,9 +319,27 @@
             impactHit();
         }
         const t = now / 1000, cw = atk ? PW2 : PW, cs = atk ? PS2 : PS;
-        if (sw < 0) {
+        if (areaSwing >= 0) {
+            const u = areaSwing;
+            if (u < .35)
+                mixP(PI_, PA1, u / .35);
+            else if (u < .7) {
+                const v = (u - .35) / .35;
+                mixE(PA1, PA2, v);
+                const k = Math.sin(Math.PI * Math.min(1, v * 1.15));
+                pose[2] -= 1.2 * k;
+                pose[3] -= .9 * k;
+                pose[4] -= 1.5 * k;
+            }
+            else
+                mixP(PA2, PI_, (u - .7) / .3);
+        }
+        else if (sw < 0) {
             for (let i = 0; i < 6; i++)
                 pose[i] = PI_[i];
+            blockK += ((PLAYER_BLOCK ? 1 : 0) - blockK) * Math.min(1, dt * 14);
+            for (let i = 0; i < 6; i++)
+                pose[i] += (PB[i] - PI_[i]) * blockK;
             pose[0] += b * .008;
             pose[1] += Math.abs(b) * .015 + Math.sin(t * 1.6) * .006;
         }
@@ -368,6 +411,8 @@
         if (rAlive)
             rg.attributes.position.needsUpdate = true; // só envia à GPU quando há partícula viva (inclui o frame em que a última some)
         impactUpdate(dt);
+        if (active)
+            coliseumCubesUpdate(dt); // cubos verdes do coliseu (parados na pausa)
         if (hqOn)
             sunFollow();
         vegCull();

@@ -12,6 +12,8 @@
     const impQ = new THREE.Quaternion(), impAx = new THREE.Vector3(), impR = new THREE.Matrix4(), impA = new THREE.Matrix4(), impB = new THREE.Matrix4(), impM = new THREE.Matrix4();
     function impactHit() {
         const fx = -Math.sin(yaw), fz = -Math.cos(yaw), reach = IMP.reach, pad = IMP.pad;
+        if (inColiseum && coliseumCubesHit(fx, fz)) // cubos verdes do coliseu (coliseum.js): 3 golpes matam
+            return;
         if (inCube) { // no cubo só existem as paredes (cubeWallHit, cube.js): toca o som de pedra
             for (let d = .5; d <= reach + 1e-6; d += .4)
                 if (cubeWallHit(px + fx * d, pz + fz * d, pad)) {
