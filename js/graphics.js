@@ -435,24 +435,17 @@
         btn(mB.dash, () => { if (active)
             dashQ = true; });
         {
-            // botao BLOQUEAR (segurar): criado em JS (sem index.html/style.css); ajuste right/bottom ao layout dos outros botoes
-            const e = document.createElement('div');
-            e.id = 'mBlock';
-            e.textContent = 'BLOQ';
-            e.style.cssText = 'position:fixed;z-index:3;right:calc(24px*var(--m,1));bottom:calc(190px*var(--m,1));width:calc(64px*var(--m,1));height:calc(64px*var(--m,1));border-radius:50%;display:none;align-items:center;justify-content:center;background:rgba(40,60,110,.55);border:3px solid rgba(255,255,255,.6);color:#fff;font:700 13px ui-monospace,monospace;user-select:none;-webkit-user-select:none;touch-action:none;';
-            document.body.appendChild(e);
+            // botoes BLOQUEAR (segurar) e ATAQUE FORTE (area): HTML em index.html (#mBlock/#mArea), estilo em style.css; mobileFrame so os mostra no coliseu
+            const e = document.getElementById('mBlock'), a = document.getElementById('mArea');
             mBlockEl = e;
-            const a = document.createElement('div');
-            a.id = 'mArea';
-            a.textContent = 'AREA';
-            a.style.cssText = e.style.cssText.replace('bottom:calc(190px', 'bottom:calc(270px').replace('rgba(40,60,110,.55)', 'rgba(120,40,40,.55)');
-            document.body.appendChild(a);
             mAreaEl = a;
-            a.addEventListener('pointerdown', ev => { ev.preventDefault(); ev.stopPropagation(); if (active && !dlgOn)
+            btn(a, () => { if (active && !dlgOn)
                 areaQ = performance.now(); });
-            e.addEventListener('pointerdown', ev => { ev.preventDefault(); ev.stopPropagation(); if (active)
-                mobBlock = true; });
-            const up = () => { mobBlock = false; };
+            e.addEventListener('pointerdown', ev => { ev.preventDefault(); ev.stopPropagation(); if (active) {
+                mobBlock = true;
+                e.classList.add('on');
+            } });
+            const up = () => { mobBlock = false; e.classList.remove('on'); };
             e.addEventListener('pointerup', up);
             e.addEventListener('pointercancel', up);
             e.addEventListener('pointerleave', up);
